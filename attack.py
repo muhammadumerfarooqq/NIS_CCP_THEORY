@@ -19,7 +19,10 @@ known_plaintext_attack    ciphertext + a crib (the first M plaintext letters).
 Usage
 -----
     python attack.py            full experiments, 100 trials per cell
+                                (writes results/attack_results.csv)
     python attack.py --quick    10 trials per cell
+                                (writes results/attack_results_quick.csv,
+                                 never the full-run file)
 
 Standard library only.
 
@@ -92,6 +95,9 @@ MIN_CHECKS = 3
 # so the program works no matter which folder you start it from.
 CORPUS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "corpus.txt")
 RESULTS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", "attack_results.csv")
+# A --quick run (only 10 trials) writes HERE, so it can never overwrite the
+# full 100-trial results file above. This file is ignored by git.
+RESULTS_PATH_QUICK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "results", "attack_results_quick.csv")
 
 # Experiment settings: message lengths to test, crib sizes to test, and the
 # fixed crib size / message length used by Table 2 and Table 3.
@@ -509,12 +515,26 @@ def _run_cell(rng, corpus, n, trials, crib_size=None):
     }
 
 
-def run_experiments(trials=100, seed=486):
+class CancelledError(Exception):
+    """Raised by a progress callback to stop run_experiments early.
+
+    The GUI's Cancel button works like this: the callback notices the user
+    pressed Cancel and raises CancelledError; run_experiments does not catch
+    it, so it travels up to whoever started the run.
+    """
+
+
+def run_experiments(trials=100, seed=486, progress=None):
     """Run Tables 1-3 and return {"table1": rows, "table2": rows, "table3": rows}.
 
     One random.Random(seed) drives every trial, so results are reproducible
     on the same Python version. Corpus windows are random; keys are random
     letters of random length 10..20; rails are random 2..10.
+
+    progress (optional): a function progress(done, total) called after each
+    finished table row ("cell"), e.g. progress(3, 17) = 3 of 17 rows done.
+    If it raises CancelledError the run stops there. With progress=None
+    (the default) nothing is called and the results are exactly as before.
     """
     # A fixed seed makes the "random" choices repeat exactly on every run, so
     # anyone can reproduce the numbers.
@@ -522,14 +542,22 @@ def run_experiments(trials=100, seed=486):
     corpus = load_corpus()
     if len(corpus) < max(TEXT_LENGTHS):
         raise SystemExit("Corpus is shorter than the longest test text.")
-    return {
-        # Table 1: frequency attack at each message length.
-        "table1": [_run_cell(rng, corpus, n, trials) for n in TEXT_LENGTHS],
-        # Table 2: known-plaintext attack, crib of 30, each message length.
-        "table2": [_run_cell(rng, corpus, n, trials, DEFAULT_CRIB) for n in TEXT_LENGTHS],
-        # Table 3: known-plaintext attack, message of 500, different crib sizes.
-        "table3": [_run_cell(rng, corpus, TABLE3_LENGTH, trials, m) for m in CRIB_SIZES],
-    }
+    # Every table row to compute, in the same order as always (all of
+    # Table 1, then Table 2, then Table 3), so the random numbers are drawn in
+    # exactly the same order and the results do not change.
+    #   Table 1: frequency attack at each message length.
+    #   Table 2: known-plaintext attack, crib of 30, each message length.
+    #   Table 3: known-plaintext attack, message of 500, different crib sizes.
+    jobs = ([("table1", n, None) for n in TEXT_LENGTHS]
+            + [("table2", n, DEFAULT_CRIB) for n in TEXT_LENGTHS]
+            + [("table3", TABLE3_LENGTH, m) for m in CRIB_SIZES])
+    results = {"table1": [], "table2": [], "table3": []}
+    for done, (table, n, crib) in enumerate(jobs, start=1):
+        results[table].append(_run_cell(rng, corpus, n, trials, crib))
+        # Tell the caller how far we are (the caller may raise CancelledError).
+        if progress is not None:
+            progress(done, len(jobs))
+    return results
 
 
 # ==========================================================================
@@ -589,7 +617,10 @@ def main(argv=None):
     print(format_table(_TITLES["table1"], results["table1"], "text_length"), end="\n\n")
     print(format_table(_TITLES["table2"], results["table2"], "text_length"), end="\n\n")
     print(format_table(_TITLES["table3"], results["table3"], "crib"), end="\n\n")
-    print(f"Results written to {write_csv(results)}")
+    # Choose where to save: a quick run goes to its own file so the full-run
+    # results are never replaced by the smaller, noisier quick numbers.
+    csv_path = RESULTS_PATH_QUICK if args.quick else RESULTS_PATH
+    print(f"Results written to {write_csv(results, csv_path)}")
 
 
 # Run main() only when this file is started directly (python attack.py), not

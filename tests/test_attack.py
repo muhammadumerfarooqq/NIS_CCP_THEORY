@@ -1,7 +1,12 @@
+import contextlib
 import inspect
+import io
+import os
 import random
 import string
+import tempfile
 import unittest
+from unittest import mock
 
 import attack
 import cipher
@@ -110,6 +115,55 @@ class TestThreatModel(unittest.TestCase):
         for name in freq + kpa:
             for secret in ("key", "rail", "length"):
                 self.assertNotIn(secret, name.lower())
+
+
+class TestQuickCsvPath(unittest.TestCase):
+    """Phase 4: --quick must write its own file, never the full-run CSV."""
+
+    def test_quick_does_not_overwrite_full_csv(self):
+        row = {"text_length": 100, "crib": "", "trials": 1, "exact_pct": 0.0,
+               "plaintext_acc_pct": 0.0, "key_acc_pct": 0.0, "rails_pct": 0.0,
+               "median_ms": 1.0, "median_guesses": 144}
+        fake = {"table1": [row], "table2": [row], "table3": [row]}
+        trials_seen = []
+
+        def fake_run_experiments(trials=100, seed=486):
+            trials_seen.append(trials)  # remember what main() asked for
+            return fake
+
+        real_csv = os.path.join(os.path.dirname(attack.RESULTS_PATH), "attack_results.csv")
+
+        def read_bytes(path):
+            # The file's bytes, or None if it does not exist (file always closed).
+            if not os.path.exists(path):
+                return None
+            with open(path, "rb") as fh:
+                return fh.read()
+
+        real_before = read_bytes(real_csv)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            full = os.path.join(tmp, "attack_results.csv")
+            quick = os.path.join(tmp, "attack_results_quick.csv")
+            with open(full, "w") as fh:
+                fh.write("SENTINEL")
+            with mock.patch.object(attack, "RESULTS_PATH", full), \
+                    mock.patch.object(attack, "RESULTS_PATH_QUICK", quick), \
+                    mock.patch.object(attack, "run_experiments", fake_run_experiments), \
+                    contextlib.redirect_stdout(io.StringIO()):
+                attack.main(["--quick"])
+                # The quick run wrote the quick file and left the full file alone.
+                self.assertTrue(os.path.exists(quick))
+                with open(full) as fh:
+                    self.assertEqual(fh.read(), "SENTINEL")
+                # A normal run writes the full file.
+                attack.main([])
+                with open(full) as fh:
+                    self.assertTrue(fh.read().startswith("table,"))
+        self.assertEqual(trials_seen, [10, 100])
+
+        # And the real results folder was never touched by this test.
+        self.assertEqual(real_before, read_bytes(real_csv))
 
 
 class TestEnglishFreq(unittest.TestCase):

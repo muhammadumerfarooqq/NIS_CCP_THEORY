@@ -12,3 +12,7 @@ __pycache__/
 
 # Temporary results
 results/*.tmp
+# Quick (fewer-trials) runs write their own files so they never replace a full run
+results/*_quick.csv
+# Files saved from the GUI's "Save as CSV..." button
+results/*_gui.csv

@@ -11,6 +11,7 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** Spaces, digits, punctuation, case and non-ASCII letters are dropped by `sanitize` on encrypt. They cannot be restored on decrypt, so the decrypted text is the cleaned text, not the original.
 - **Viva defence:** The classical Vigenere and Rail Fence ciphers are defined over a 26-letter alphabet; the mod-26 arithmetic is the whole point. Restricting input keeps the maths exact and the round-trip provable.
 - **Planned fix:** Optionally record removed characters' positions/values so the original formatting can be re-inserted, or widen the alphabet (e.g. printable ASCII, mod 95).
+- **Phase 5 note:** The GUI makes the loss visible instead of silent: it shows how many characters were removed (under the cleaned-text box and in the status bar) and keeps a permanent note on the Lock / Unlock tab. It does not bring the characters back, so the limitation itself stays.
 - **Status:** OPEN (accepted for the A-Z design)
 
 ## L2. Rail Fence key space is tiny
@@ -37,12 +38,14 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** `vigenere_encrypt/decrypt` accept any non-empty letter key (needed for textbook vectors such as `CIPHER`, `TRICKEM`). Only `validate_key`, called by `custom_encrypt/decrypt`, enforces length >= 10 and rails 2..10. `rail_encrypt/decrypt` accept any rails >= 2.
 - **Viva defence:** The primitives are kept general so they can be verified against published examples; the policy lives at the layer users actually call.
 - **Planned fix:** GUI and any CLI must always go through `custom_*`/`validate_key`.
-- **Status:** OPEN
+- **Phase 5 fix:** Every Lock and Unlock in the GUI checks the key and rails with `validate_key` first and shows the plain-English reason in red if they are not allowed; the GUI only calls `custom_encrypt` / `custom_decrypt` for locking (the tests check that a 9-letter key gives a red message and no output). The primitives themselves stay deliberately general, as defended above.
+- **Status:** SOLVED in Phase 5 (for the GUI; the command-line scripts never accepted user keys)
 
 ## L6. Weak keys pass validation
 - **Limitation:** `validate_key` checks only characters and length. Keys such as `AAAAAAAAAA` (shift of 0, i.e. no encryption at Stage 1) or `ABABABABAB` (period 2) are accepted.
 - **Viva defence:** The spec defines validity as letters-only and >= 10 letters; judging key quality is a separate problem and is warned about here and in L3.
 - **Planned fix:** Add a key-strength warning (repeated pattern, low letter variety) in the GUI step.
+- **Phase 5 note:** NOT done. The Phase 5 specification did not include a key-strength warning, so the GUI accepts `AAAAAAAAAA` like `validate_key` does (the live counter only checks letters and length). The planned fix is still wanted.
 - **Status:** OPEN
 
 ## L7. Deterministic, no IV, no integrity protection
@@ -61,12 +64,14 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** `vigenere_*` and `shift_*` raise `ValueError` for anything outside uppercase A-Z; callers must run `sanitize` first. `custom_*` do not call `sanitize` themselves.
 - **Viva defence:** Failing loudly is safer than silently producing wrong output; sanitising is a separate, visible step so the user sees how many characters were dropped.
 - **Planned fix:** The GUI will call `sanitize` and show the removed count.
-- **Status:** OPEN
+- **Phase 5 fix:** Done. The GUI cleans the message with `sanitize` before every lock or unlock and reports the removed count; the attack page cleans a pasted ciphertext and crib the same way.
+- **Status:** SOLVED in Phase 5
 
 ## L10. Keys are plain Python strings
 - **Limitation:** Keys live in ordinary immutable `str` objects, so they cannot be wiped from memory and could appear in logs or tracebacks if a caller prints them.
 - **Viva defence:** Python offers no reliable way to zero immutable strings; for a coursework cipher this is acceptable. Keys are never hardcoded or stored by the code.
 - **Planned fix:** Avoid logging keys in later steps; read them from user input only.
+- **Phase 5 note:** The GUI reads the key only from the key field and never prints, logs or saves it; a search of `gui.py` confirms the only file it writes is the one chosen in the Save dialog (which saves result tables, not keys). The key is still visible on screen and held in memory while the window is open: see L38.
 - **Status:** ACCEPTED
 
 ## L11. No key generation helper
@@ -79,14 +84,15 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** Tests cover the required vectors, random round-trips, edge cases and validation, but not rejection of bad text input in the primitives or Unicode edge cases (e.g. `ß`, which uppercases to `SS`; handled in `sanitize` but not covered by a test). Only run on Python 3.14 on Windows so far.
 - **Viva defence:** The step specified an exact vector list; extra tests were not added to avoid deviating from it.
 - **Planned fix:** Add the extra tests in a later step once agreed.
-- **Status:** OPEN. The `ß` part is SOLVED in Step 2 (regression test `sanitize("Straße é 1") == ("STRAE", 5)` added). Still open: tests that the primitives reject bad text, and runs on other Python versions / operating systems.
+- **Status:** OPEN. The `ß` part is SOLVED in Step 2 (regression test `sanitize("Straße é 1") == ("STRAE", 5)` added). Still open: tests that the primitives reject bad text, and runs on other Python versions / operating systems. Phase 5 note: the GUI smoke tests are skipped (not failed) on a computer with no display, and so far ran only on Windows (see L34).
 
 ## L13. Pure-Python performance
 - **Limitation:** All functions are O(N) but implemented with Python-level loops and temporary lists, so very large inputs (many MB) will be slow and memory-hungry compared with compiled code.
 - **Viva defence:** Linear time is the relevant complexity result; constant factors are irrelevant at the text sizes this project handles.
 - **Planned fix:** Measure in the benchmark step.
 - **Step 2 note:** The attacks time at roughly 20-60 ms (frequency) and 5-170 ms (known-plaintext) for 100-5000 letters, which is fine for this project, but see L18 for how far to trust those timings.
-- **Status:** OPEN (formal benchmarks still to do)
+- **Phase 4 result:** `benchmark.py` measured this. Custom encryption costs about 0.30 to 0.33 microseconds per character from N = 100 to N = 100,000, with a log-log slope of 1.012 (linear). A 100,000-letter message takes about 33 ms and about 4.8 MB (4,874 KB) of extra memory (about 50 bytes per character; Shift uses about 9). So the pure-Python speed is perfectly adequate for this project, and the cost is a constant factor, not a worse growth rate. Machine-dependence of these numbers: see L29.
+- **Status:** SOLVED in Phase 4 (measured; the limitation itself, that Python is slower than compiled code, is ACCEPTED)
 
 ---
 
@@ -120,7 +126,8 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** Reported milliseconds come from `time.perf_counter` on one machine with one Python version, with other programs running; they will differ elsewhere. Only the medians and the way time grows with N are meaningful.
 - **Viva defence:** Medians reduce the effect of outliers, and the project's claim is about linear growth (O(N)), not absolute speed.
 - **Planned fix:** The benchmark step should repeat runs and report spread.
-- **Status:** OPEN
+- **Phase 4 note:** `benchmark.py` now does this: warm-up call, garbage collection off, between 5 and 2000 repeats per measurement (chosen from a time budget), and it reports the median plus the interquartile range. The attack experiments in `attack.py` still time each trial once and report the median over trials, which is unchanged. Timings remain machine-dependent by nature (L29).
+- **Status:** SOLVED in Phase 4 for the benchmark tables; OPEN for the per-trial times printed by `attack.py`
 
 ## L19. Statistical precision of the experiments
 - **Limitation:** Each table row uses 100 trials (10 with `--quick`) and one seed (486), so a percentage such as 84 % carries a sampling error of several points. Results are reproducible given the same Python version, but are one sample, not a long-run average.
@@ -150,7 +157,8 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** `results/attack_results.csv` is overwritten each run (a `--quick` run replaces a full-run file). `.gitignore` excludes only `results/*.tmp`, so the CSV is not ignored and could be committed in either state by accident.
 - **Viva defence:** Keeping the CSV in the repository makes the reported numbers reproducible and checkable.
 - **Planned fix:** Write quick runs to a different filename, or ignore the CSV and commit only a chosen final one.
-- **Status:** OPEN
+- **Phase 4 fix:** `python attack.py --quick` now writes `results/attack_results_quick.csv`, and `results/*_quick.csv` is in `.gitignore`, so a quick run can no longer replace the full-run file (a test with a temporary folder checks this, and a real quick run left the full CSV byte-for-byte unchanged). `benchmark.py --quick` follows the same rule.
+- **Status:** SOLVED in Phase 4 (the full-run CSV files are still ordinary tracked files; committing them remains the author's choice)
 
 ## L24. Bug found and fixed while building the known-plaintext attack
 - **Limitation:** An empty crib ("") first hit the "letters only" check and returned a misleading error instead of "crib too short" (found by the new test).
@@ -180,10 +188,85 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** Phase 3 added many explanatory comments and worked examples to `cipher.py` and `attack.py`. Comments are not executed, so a later code change could leave them out of date without any test failing.
 - **Viva defence:** Logic was proved unchanged by comparing the syntax tree (comments and docstrings removed) before and after commenting, and the numeric examples in the comments (e.g. HELLO + CAT -> JEENO, ABCDEFGHIJ on 3 rails -> AEIBDFHJCG) were checked against the real functions.
 - **Planned fix:** Re-check the examples whenever the code changes; optionally turn them into doctests.
+- **Phase 5 note:** Partly reduced for the new text: the worked examples shown in the GUI (D+C=F, HELLO with key CAT = JEENO, ABCDEFGHIJ on 3 rails = AEIBDFHJCG) are asserted in `tests/test_explain.py` and `tests/test_gui_helpers.py`, and every number in the "How It Works" tab that describes results is read from the CSV files at runtime. The comments in `cipher.py` and `attack.py` are still not tested.
 - **Status:** OPEN
 
 ## L28. A crib that is too short to verify falls back to English scoring
 - **Limitation:** The known-plaintext attack only trusts a candidate that passes at least `MIN_CHECKS` = 3 periodicity checks, which needs M >= L + 3 (L = true key length). When M <= L + 2 the crib gives fewer than 3 checks, nothing can be verified, and the attack falls back to choosing the most English-looking candidate. That fallback works on English text but fails on non-English plaintext such as random letters. Measured separately (outside the test suite, 1,100 trials per row, N = 500, random-letter plaintext, keys 10..20, seed 486): crib 30 recovers 100 %; crib 20 recovers about 74 % (73.8 %), failing only for keys of length 18 to 20; crib 15 recovers about 29 %, succeeding only for keys of length 10 to 12. When M < L the key cannot be recovered at all, whatever the plaintext (L16). Also, a wrong candidate could pass three checks by chance, about 0.8 % of attacks (the figure used to choose `MIN_CHECKS`); this was not observed in testing.
 - **Viva defence:** Three clean repeats are the least evidence we accept as proof, and below that the attack honestly reverts to the best guess it has (English statistics) rather than claiming a proof it does not have. A short crib simply contains too little information to pin down a long key.
 - **Planned fix:** Return the top few candidates instead of one when nothing is verified; or require a longer crib and report "insufficient crib" instead of guessing. Not done.
+- **Status:** OPEN
+
+---
+
+# Added in Phase 4 (benchmarks and complexity evidence)
+
+## L29. Benchmark timings are machine-dependent and tied to the Python interpreter
+- **Limitation:** All figures come from one machine (CPython 3.14.6, Windows 11, 16 logical CPUs) with other programs running and a CPU whose speed can change. Another Python version, interpreter (for example PyPy) or computer would give different milliseconds. The number of repeats is chosen from a time budget, so it also differs between machines. Garbage collection is switched off while timing, which makes the numbers slightly more favourable than normal use. The spread is visible in the results: for example Shift encryption at N = 100,000 had an interquartile range of 1.14 ms on a median of 14.3 ms.
+- **Viva defence:** Each number is a median of many repeats with its IQR beside it, and the claims made rest on shapes and ratios (flat microseconds per character, slope near 1, custom about 2 times Shift), not on the absolute values. The machine is printed at the top of every report.
+- **Planned fix:** Repeat the full run on a second machine and state both; none planned beyond that.
+- **Status:** ACCEPTED
+
+## L30. Timings at N = 100 are close to timer noise, and the straight-line fit is only approximate
+- **Limitation:** A 100-letter encryption takes only about 0.03 ms, so fixed per-call costs (function calls, input checking, the timer call itself) are a visible part of it. The straight-line fit `time = a*N + b` shows the effect: for custom encryption and decryption the fitted intercept b came out negative (-0.058 ms and -0.278 ms), which cannot be true physically, so the line is only an approximation and R-squared for custom decryption (0.99837) is the weakest of the three. The log-log slope is less sensitive to this.
+- **Viva defence:** The smallest size gets the most repeats (2000) and the median is used, and the O(N) conclusion rests on the whole range of six sizes, not on any single point.
+- **Planned fix:** Optionally refit using only N >= 1000 and compare, or add sizes beyond 100,000.
+- **Status:** OPEN
+
+## L31. The custom/Shift ratio is not a fixed constant
+- **Limitation:** The ratio was 1.94 to 2.27 here and crept up with N (1.97 at N = 100 to 2.27 at N = 100,000); the cost per character of custom encryption also rose by about 10 % at the two largest sizes (0.296 us at N = 5,000 to 0.331 us at N = 50,000). The cause was not investigated (memory behaviour is a plausible guess, not a finding). The ratio also depends on this implementation of Shift and on the rails and key length used. Rails 2 to 10 and key lengths 10 to 100 were tested only at N = 10,000 and showed no trend beyond the run-to-run spread; key lengths comparable to the message length were not tested, which is where the `k` in O(N + k) would start to matter.
+- **Viva defence:** A constant-factor difference of about 2 times is expected, since the custom cipher does two passes over the data plus input checks. The growth rate, which is the complexity claim, stayed linear (slope 1.012).
+- **Planned fix:** Test key lengths up to the message length and investigate the rise at large N if it matters.
+- **Status:** OPEN
+
+## L32. Memory was measured with tracemalloc only
+- **Limitation:** `tracemalloc` reports Python's own allocations during one call (the input text, made earlier, is not counted; the result is). It is not an operating-system measurement (working set, fragmentation, memory the allocator keeps after freeing), it slows the code so it is run separately from the timing, and each size was measured once. The 50 bytes per character for custom encryption (against about 9 for Shift) presumably comes mostly from temporary lists such as the position list in `rail_order`, but this was not profiled.
+- **Viva defence:** The purpose was to show how memory grows with N, and a ten-fold larger message used about ten times the memory (4,873.8 KB against 487.5 KB), which indicates O(N) space. The exact bytes are not claimed to match what the operating system reports.
+- **Planned fix:** Cross-check once by hand with an operating-system tool (for example Task Manager's peak working set) and note the difference.
+- **Status:** OPEN
+
+## L33. The complexity evidence is empirical and covers a limited range
+- **Limitation:** The fits use six sizes from 100 to 100,000 letters and one full run. A log-log slope between 0.99 and 1.01 with R-squared of at least 0.998 supports O(N) but cannot prove it; behaviour far beyond 100,000 (memory limits, cache effects) is not tested. The "linear" band (slope 0.85 to 1.15) was fixed in advance but is a judgement. The slope's own uncertainty was not measured.
+- **Viva defence:** The O(N) claim comes first from reading the code (each function makes single passes; `rail_order` places every index on a rail once), and the measurements are an independent check that agrees with it, not the only evidence.
+- **Planned fix:** Repeat the full run several times to report the spread of the slope; add N = 1,000,000 if memory allows.
+- **Status:** OPEN
+
+---
+
+# Added in Phase 5 (the desktop GUI)
+
+## L34. The GUI needs a desktop display and was only checked on Windows
+- **Limitation:** `python gui.py` needs a graphical desktop and tkinter 8.6. The layout was checked only on Windows, at the minimum window size (950 x 680), at one display scale, by looking at screenshots; other operating systems, scales or fonts (the window asks for Segoe UI and Consolas, which other systems replace with something else) may look different or clip. The automated GUI tests build the window hidden and are skipped, not failed, when no display exists, so on a computer without a display only the window-free tests (`tests/test_explain.py`, `tests/test_gui_helpers.py`) run.
+- **Viva defence:** The GUI contains no calculation of its own: all lock, unlock, attack and benchmark results come from `cipher.py`, `attack.py` and `benchmark.py`, which are tested without a window. Handlers such as `do_encrypt` work without a mouse, which is what the smoke tests call.
+- **Planned fix:** Try the window on one other operating system or display scale and adjust the layout if anything clips.
+- **Status:** OPEN
+
+## L35. Show Working covers only the first letters
+- **Limitation:** The Vigenere table shows the first 15 letters and the Rail Fence grid the first 40, to stay readable. For a longer message the grid is the zigzag of just those first 40 letters, so its joined result is not the whole ciphertext (the window says so). Nothing is shown for the rest.
+- **Viva defence:** The rule is the same for every letter, so a few rows show the whole method, and each row is checked against `cipher.py`. The window labels clearly that only the first letters are drawn.
+- **Planned fix:** Optionally let the user choose how many rows to show, or page through them.
+- **Status:** ACCEPTED
+
+## L36. Responsiveness limits: Cancel is not instant, and Lock / Unlock run on the main thread
+- **Limitation:** Experiments and the speed test run in a background thread, so the window stays usable, but Cancel is only noticed when the current table row or measurement finishes. In a full experiment run the longest row (known-plaintext attack, 5,000 letters, 100 trials) takes about 17 seconds, so Cancel can take that long to take effect; the speed test's measurements take about a second each. Lock and Unlock themselves run on the main thread (they are fast: about 0.3 microseconds per letter), so a message of many millions of letters would freeze the window briefly. Closing the window during a run asks the worker to stop at its next checkpoint, and the thread is a daemon so it never keeps the program alive.
+- **Viva defence:** The progress callback was specified to be called after each finished cell, which is also the natural place to stop without leaving half-computed rows. The window says "cancelling - finishing the current row". Messages typed or pasted by hand are far below the size where the delay would matter.
+- **Planned fix:** Add a finer progress callback inside a table row (per trial) so Cancel reacts within a fraction of a second; move Lock / Unlock to a worker thread above a size limit.
+- **Status:** OPEN
+
+## L37. The speed test inside the window is noisier and is not saved
+- **Limitation:** While the speed test runs, the window's own event loop and the other tabs share the same program, and garbage collection is switched off for the whole program during each measurement, so the numbers can be slightly worse or noisier than from `python benchmark.py`. The window also has no button to save a speed run (only the experiment tables can be saved), so a GUI run is shown but not kept. Machine-dependence of all timings: see L29.
+- **Viva defence:** The window says "timings depend on this machine" and recommends `python benchmark.py` for the cleanest numbers; the saved full-run file can be loaded instantly with "Load saved results", which is what to show in a viva.
+- **Planned fix:** Add a "Save as CSV..." button for speed runs with the same protections as the experiments page.
+- **Status:** OPEN
+
+## L38. The key is visible on screen and stays in memory while the window is open
+- **Limitation:** The key is shown in plain text in the key field (it is not masked), so someone looking at the screen can read it. It stays in the window's memory until the program ends and cannot be wiped (L10). The Copy output button copies only the output, but anything copied to the clipboard stays there until replaced. The key is never written to a file, printed or logged by the program.
+- **Viva defence:** The project demonstrates a classical cipher, and being able to see the key while locking and unlocking is part of showing how it works; classical ciphers are not secure for real secrets in any case (L4).
+- **Planned fix:** Optionally add a "hide key" tick box (masking with dots) and clear the key field when the window closes.
+- **Status:** ACCEPTED
+
+## L39. Test messages use a private helper and unseeded randomness
+- **Limitation:** "Make a test message for me" calls `attack._make_trial`, a function whose name starts with an underscore (internal to `attack.py`), so renaming it there would break the GUI; the tests would catch it. The message, key and rails are different on every press (the random generator is seeded from the operating system on purpose, so the answer cannot be guessed), which means a GUI attack run cannot be repeated exactly. It uses the author's own English corpus, so the same caveats as L14 apply.
+- **Viva defence:** Reusing the very function that produces the experiment trials guarantees the GUI's test messages are made exactly like the ones in the tables. Repeatability is available from the command line, where the seed is fixed (486).
+- **Planned fix:** Make that helper public (rename it without the underscore) in a later change, and optionally add a "use seed" box.
 - **Status:** OPEN
