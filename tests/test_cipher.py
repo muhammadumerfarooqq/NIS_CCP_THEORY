@@ -88,6 +88,10 @@ class TestSanitize(unittest.TestCase):
     def test_sanitize(self):
         self.assertEqual(sanitize("Hello, World 123"), ("HELLOWORLD", 6))
 
+    def test_sanitize_unicode_regression(self):
+        # "ß" uppercases to "SS"; it must be dropped, not expanded.
+        self.assertEqual(sanitize("Straße é 1"), ("STRAE", 5))
+
 
 class TestValidateKey(unittest.TestCase):
     def test_rejects_short_key(self):
