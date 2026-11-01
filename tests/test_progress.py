@@ -45,12 +45,12 @@ class TestAttackProgress(unittest.TestCase):
         self.assertEqual(without_timing(plain), without_timing(positional))
         self.assertEqual(without_timing(plain), without_timing(with_progress))
         self.assertEqual(list(plain), ["table1", "table2", "table3"])
-        self.assertEqual([len(plain[t]) for t in plain], [6, 6, 5])
+        self.assertEqual([len(plain[t]) for t in plain], [7, 7, 5])
 
     def test_progress_reports_every_cell(self):
         calls = []
         attack.run_experiments(trials=1, progress=lambda d, t: calls.append((d, t)))
-        self.assertEqual(calls, [(i, 17) for i in range(1, 18)])
+        self.assertEqual(calls, [(i, 19) for i in range(1, 20)])
 
     def test_callback_can_cancel(self):
         calls = []

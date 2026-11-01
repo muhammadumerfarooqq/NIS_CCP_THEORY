@@ -2,11 +2,13 @@
 
     python gui.py
 
-One window, four tabs:
-    1. Lock / Unlock   encrypt and decrypt a message, with optional step-by-step working
-    2. Break It        try the two attacks, and run the experiments
-    3. Speed Test      time the cipher and see the growth is linear
-    4. How It Works    plain-English explanation, with numbers read from the results files
+One window, four tabs (named after the course project's requirements):
+    Req 2 - Encrypt & Decrypt           lock and unlock a message, with optional step-by-step working
+    Req 3 / Deliverable 2 - Attack      try the two attacks, and run the experiments
+    Req 4 - Efficiency                  time the cipher and see the growth is linear
+    Req 1 / Deliverable 1 - Design      plain-English explanation, with numbers read from the results files
+
+The START HERE button (top right) starts a 5-step guided tour through the real buttons.
 
 SAFETY RULES this program follows:
     * No network, no local server, no eval/exec.
@@ -34,11 +36,23 @@ import math
 import os
 import queue
 import random
+import statistics
 import string
 import threading
 import time
-import tkinter as tk
-from tkinter import filedialog, ttk
+
+# tkinter ships with most Python installs, but not all (some Linux systems
+# need a separate "python3-tk" package). If it is missing we do NOT crash
+# with a traceback: main() prints one friendly line instead, and the
+# window-free helpers in this file can still be imported.
+try:
+    import tkinter as tk
+    from tkinter import filedialog, ttk
+    from tkinter import font as tkfont
+    TKINTER_ERROR = None
+except ImportError as _error:
+    tk = filedialog = ttk = tkfont = None
+    TKINTER_ERROR = str(_error)
 
 import attack
 import benchmark
@@ -81,6 +95,33 @@ PROTECTED_FILES = [attack.RESULTS_PATH, attack.RESULTS_PATH_QUICK,
 SAMPLE_MESSAGE = "Defend the east wall of the castle. Meet at dawn, by the old bridge!"
 SAMPLE_KEY = "CRYPTOGRAPHY"
 SAMPLE_RAILS = 5
+DEFAULT_TEST_LENGTH = 500          # the message length the Attack tab starts with
+
+# The four main tabs, in order, named after the course project's requirements.
+# "·" is a middle dot. If the long names would not fit the smallest window
+# (950 pixels wide) the shorter names are used instead (see _choose_tab_titles).
+TAB_LOCK, TAB_ATTACK, TAB_EFFICIENCY, TAB_DESIGN = 0, 1, 2, 3
+TAB_TITLES_LONG = ["Req 2 · Encrypt & Decrypt", "Req 3 · Deliverable 2 · Attack",
+                   "Req 4 · Efficiency", "Req 1 · Deliverable 1 · Design"]
+TAB_TITLES_SHORT = ["Req 2: Encrypt/Decrypt", "Req 3 + Del. 2: Attack",
+                    "Req 4: Efficiency", "Req 1 + Del. 1: Design"]
+
+# What the status bar says when a tab is opened and nothing has happened there yet.
+READY_MESSAGES = {
+    TAB_LOCK: f"Ready. Type a message, a key of at least {cipher.MIN_KEY_LENGTH} letters, and press Lock.",
+    TAB_ATTACK: "Ready. Make a test message, pick an attack and press Run attack.",
+    TAB_EFFICIENCY: "Ready. Load the saved results, or press Run to measure on this machine.",
+    TAB_DESIGN: "Ready. This page explains the design; its numbers come from the saved results files.",
+}
+
+# A key with fewer different letters than this gets an orange warning (it is still allowed).
+WEAK_KEY_MIN_DISTINCT = 4
+WEAK_KEY_NOTE = "Weak key: very few different letters. Allowed, but easy to break."
+WEAK_FG = "#b45309"                 # orange-brown text for the weak-key note
+
+# The guided tour ("START HERE"): a purple banner, so it is not mistaken for a cipher stage.
+TOUR_STEPS = 5
+TOUR_BG, TOUR_FG, TOUR_EDGE = "#ede9fe", "#4c1d95", "#8b5cf6"
 
 
 # ==========================================================================
@@ -216,6 +257,52 @@ def format_speed_row(row):
     """One Table A row as strings; same decimals as benchmark prints."""
     return [str(row["n"]), f"{row['shift_enc_ms']:.4f}", f"{row['custom_enc_ms']:.4f}",
             f"{row['custom_dec_ms']:.4f}", f"{row['ratio']:.2f}", f"{row['us_per_char']:.4f}"]
+
+
+def weak_key_note(key):
+    """The orange warning for a key with very few different letters, or "" if the key is fine.
+
+    Worked examples:  "AAAAAAAAAA" -> warning (1 different letter)
+                      "ABABABABAB" -> warning (2 different letters)
+                      "CRYPTOGRAPHY" -> "" (8 different letters)
+                      "" -> ""  (nothing typed yet, so nothing to warn about)
+    It is only a warning: validate_key still accepts the key and Lock still works.
+    """
+    different = {ch.upper() for ch in key if ch.isascii() and ch.isalpha()}
+    if different and len(different) < WEAK_KEY_MIN_DISTINCT:
+        return WEAK_KEY_NOTE
+    return ""
+
+
+def experiments_banner(results):
+    """Tour step 4 text. The number of trials is READ from the loaded results
+    (never typed in). `results` is what read_attack_csv returns, or None."""
+    if not results:
+        return None
+    trials = results["table1"][0]["trials"]
+    return (f"Experiments: these tables are success rates over {trials} random trials for "
+            "each message length (the third table varies the crib size instead).")
+
+
+def efficiency_banner(data):
+    """Tour step 5 text. Every number is READ from the loaded speed results
+    (`data` is what read_benchmark_csv returns, or None).
+
+    "A straight line" is only claimed if the saved verdict for locking says
+    "linear"; otherwise the saved verdict is quoted as it is.
+    """
+    if not data:
+        return None
+    fits = {fit["name"]: fit for fit in data["fits"]}
+    fit = fits.get("Custom enc") or data["fits"][0]
+    ratio = statistics.median(row["ratio"] for row in data["table_a"])
+    sizes = len(data["table_a"])
+    if fit["verdict"].startswith("linear"):
+        growth = (f"Efficiency: time grows in a straight line with the message length (O(N)); "
+                  f"the log-log slope of locking is {fit['loglog_slope']:.2f}, where 1.00 is perfectly linear.")
+    else:
+        growth = f"Efficiency: {fit['name']}: {fit['verdict']}."
+    return f"{growth} The two-stage cipher costs about {ratio:.1f} times the Shift cipher (median of {sizes} sizes)."
 
 
 def read_attack_csv(path=ATTACK_CSV):
@@ -463,6 +550,13 @@ class App:
         self._busy = {"attack": False, "exp": False, "speed": False}
         self._cancel = {"exp": threading.Event(), "speed": threading.Event()}
         self._queue = queue.Queue()
+        # Each tab remembers its own last status message (tab number -> (message, kind)),
+        # so the bar shows the right words when you come back to a tab.
+        self._status_memory = {tab: (message, "info") for tab, message in READY_MESSAGES.items()}
+        # The guided tour: the banner is built the first time START HERE is pressed.
+        self._tour_step = None                      # None = no tour running, otherwise 1..TOUR_STEPS
+        self._tour_frame = None
+        self._tour_grew = 0                         # how many pixels taller the window was made for the banner
 
         self._build_style()
         self._build_top_bar()
@@ -470,8 +564,7 @@ class App:
         self._build_notebook()
         self._poll_id = root.after(100, self._poll_queue)
         root.protocol("WM_DELETE_WINDOW", self.close)
-        self.set_status("Ready. Type a message, a key of at least "
-                        f"{cipher.MIN_KEY_LENGTH} letters, and press Lock.", "info")
+        self._show_status(*self._status_memory[TAB_LOCK])
 
     def _build_style(self):
         """Use the calm 'clam' theme and our colours/fonts."""
@@ -489,6 +582,11 @@ class App:
         style.configure("Treeview", font=FONT_SMALL, rowheight=20, background=PANEL, fieldbackground=PANEL)
         style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
         style.configure("Go.TButton", font=FONT_BOLD, padding=(14, 5))
+        # The START HERE button stands out: white bold text on the tour's purple.
+        style.configure("Start.TButton", font=FONT_BOLD, padding=(16, 5), background=TOUR_EDGE, foreground="#ffffff")
+        style.map("Start.TButton", background=[("active", "#7c3aed"), ("pressed", "#6d28d9")],
+                  foreground=[("active", "#ffffff")])
+        style.configure("Tour.TButton", font=FONT_LABEL, padding=(10, 1))        # the small buttons in the tour banner
 
     def _build_top_bar(self):
         bar = tk.Frame(self.root, bg=BG)
@@ -498,6 +596,9 @@ class App:
         self.selftest_label = tk.Label(bar, text="Self-test: not run yet", font=FONT_BOLD, bg=BG, fg=MUTED)
         self.selftest_label.pack(side="right")
         ttk.Button(bar, text="Run Self-Test", command=self.run_self_test).pack(side="right", padx=10)
+        # Packed after the Self-Test button on the right side, so it sits to its LEFT.
+        self.start_button = ttk.Button(bar, text="START HERE", style="Start.TButton", command=self.start_tour)
+        self.start_button.pack(side="right")
 
     def _build_status_bar(self):
         bar = tk.Frame(self.root, bg="#e5e9ef")
@@ -510,24 +611,56 @@ class App:
     def _build_notebook(self):
         self.notebook = ttk.Notebook(self.root)
         self.notebook.pack(side="top", fill="both", expand=True, padx=10, pady=(4, 6))
-        tabs = [("  Lock / Unlock  ", self._build_lock_tab), ("  Break It  ", self._build_break_tab),
-                ("  Speed Test  ", self._build_speed_tab), ("  How It Works  ", self._build_help_tab)]
-        for title, builder in tabs:
+        builders = [self._build_lock_tab, self._build_break_tab, self._build_speed_tab, self._build_help_tab]
+        self.tab_titles = self._choose_tab_titles()
+        for title, builder in zip(self.tab_titles, builders):
             frame = ttk.Frame(self.notebook, padding=8)
             self.notebook.add(frame, text=title)
             builder(frame)
         self.notebook.bind("<<NotebookTabChanged>>", self._on_tab_changed)
 
-    def _on_tab_changed(self, _event=None):
-        # Re-read the results files every time the "How It Works" tab is opened.
-        if self.notebook.index(self.notebook.select()) == 3:
-            self.refresh_help()
+    def _choose_tab_titles(self):
+        """The long tab names if all four fit the smallest window, otherwise the short ones.
 
-    def set_status(self, message, kind="info"):
-        """Show a plain-English message in the bottom bar. kind: info, ok or error."""
+        Each tab is as wide as its text plus its padding (14 pixels on each side
+        and a few for the border). The room is the smallest window width (950)
+        minus the margins. The text width is measured with the real font, so this
+        also works on screens with a larger text scale.
+        """
+        font = tkfont.Font(root=self.root, font=FONT_BOLD)
+        per_tab_extra = 2 * 14 + 8
+        room = 950 - 2 * 10 - 24
+        for titles in (TAB_TITLES_LONG, TAB_TITLES_SHORT):
+            if sum(font.measure(title) + per_tab_extra for title in titles) <= room:
+                return titles
+        return TAB_TITLES_SHORT
+
+    def _current_tab(self):
+        return self.notebook.index(self.notebook.select())
+
+    def _on_tab_changed(self, _event=None):
+        tab = self._current_tab()
+        # Re-read the results files every time the Design tab is opened.
+        if tab == TAB_DESIGN:
+            self.refresh_help()
+        # The bar shows what this tab last said (or its own "Ready" message).
+        self._show_status(*self._status_memory[tab])
+
+    def _show_status(self, message, kind):
         colour = {"info": TEXT, "ok": GREEN, "error": RED}[kind]
         self.status_var.set(message)
         self.status_label.configure(fg=colour)
+
+    def set_status(self, message, kind="info", tab=None):
+        """Show a plain-English message in the bottom bar. kind: info, ok or error.
+
+        `tab` is the number of the tab the message belongs to (TAB_LOCK, ...).
+        The message is shown now AND remembered for that tab, so it comes back
+        when you return to that tab. tab=None shows it without remembering it.
+        """
+        self._show_status(message, kind)
+        if tab is not None:
+            self._status_memory[tab] = (message, kind)
 
     # ---- small widget helpers (used by every tab) ----
 
@@ -629,7 +762,8 @@ class App:
         tab.rowconfigure(4, weight=1)
 
         # --- Row 0: the message ---
-        msg = ttk.LabelFrame(tab, text="1. Message", padding=6)
+        msg = ttk.LabelFrame(tab, text="1. Message (only A-Z is kept; spaces, digits and punctuation are removed for good)",
+                             padding=6)
         msg.grid(row=0, column=0, sticky="ew")
         msg.columnconfigure(0, weight=1)
         frame, self.message_text = self._make_box(msg, PANEL, 4, editable=True)
@@ -638,7 +772,7 @@ class App:
         ttk.Button(msg, text="Clear", command=self.clear_all).grid(row=1, column=1, padx=(8, 0), pady=(4, 0), sticky="ew")
 
         # --- Row 1: key and rails (two separate inputs) ---
-        keyf = ttk.LabelFrame(tab, text="2. Key and rails  (two separate inputs)", padding=6)
+        keyf = ttk.LabelFrame(tab, text="2. Key and rails (two separate inputs)", padding=6)
         keyf.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         tk.Label(keyf, text="Stage 1 - Vigenere key (letters only):", font=FONT_BOLD, bg=BG,
                  fg=STAGE1_FG).grid(row=0, column=0, sticky="w")
@@ -657,6 +791,11 @@ class App:
         self.rails_spin = ttk.Spinbox(keyf, from_=cipher.MIN_RAILS, to=cipher.MAX_RAILS, width=4,
                                       textvariable=self.rails_var, font=FONT_MONO, wrap=False)
         self.rails_spin.grid(row=0, column=4)
+        # Row 1: the weak-key note. It is orange, never blocks anything, and is
+        # empty (but keeps its line, so the layout does not jump) for a good key.
+        self.weak_var = tk.StringVar()
+        self.weak_label = tk.Label(keyf, textvariable=self.weak_var, font=FONT_SMALL, bg=BG, fg=WEAK_FG, anchor="w")
+        self.weak_label.grid(row=1, column=0, columnspan=5, sticky="w")
         self.key_var.trace_add("write", self._update_key_counter)
         self._update_key_counter()
 
@@ -699,10 +838,6 @@ class App:
         self.check_label.pack(side="left")
         self.time_label = tk.Label(info, text="", font=FONT_LABEL, bg=BG, fg=MUTED)
         self.time_label.pack(side="right")
-        tk.Label(tab, bg=BG, fg=MUTED, font=FONT_SMALL, anchor="w",
-                 text="Only the letters A-Z are used. Spaces, digits and punctuation are removed when you "
-                      "lock, and cannot be brought back when you unlock."
-                 ).grid(row=6, column=0, sticky="ew")
 
     # ---- key field behaviour ----
 
@@ -724,6 +859,7 @@ class App:
         good = letters >= cipher.MIN_KEY_LENGTH and letters == len(key)
         self.counter_label.configure(text=f"{letters} / {cipher.MIN_KEY_LENGTH} letters",
                                      fg=GREEN if good else RED)
+        self.weak_var.set(weak_key_note(key))               # "" for a good key
 
     # ---- output boxes ----
 
@@ -786,7 +922,7 @@ class App:
             self.key_var.set(SAMPLE_KEY)
             self.rails_var.set(str(SAMPLE_RAILS))
         self.inline_var.set("")
-        self.set_status("Loaded a sample message. Press Lock to encrypt it.", "info")
+        self.set_status("Loaded a sample message. Press Lock to encrypt it.", "info", TAB_LOCK)
 
     def clear_all(self):
         """Empty the message and every output."""
@@ -794,7 +930,7 @@ class App:
         self._clear_outputs()
         self.inline_var.set("")
         self._last_op = None
-        self.set_status("Cleared.", "info")
+        self.set_status("Cleared.", "info", TAB_LOCK)
 
     # ---- reading and checking the inputs ----
 
@@ -823,7 +959,7 @@ class App:
         """Show `message` in red, clear old output, and return None."""
         self.inline_var.set(message)
         self._clear_outputs()
-        self.set_status("Nothing was done - see the red message.", "error")
+        self.set_status("Nothing was done - see the red message.", "error", TAB_LOCK)
         return None
 
     @staticmethod
@@ -857,7 +993,7 @@ class App:
         self._last_op = {"mode": "lock", "clean": clean, "middle": stage1, "final": final,
                          "key": key, "rails": rails}
         self.set_status(f"Done in {elapsed_ms:.2f} ms.{self._removed_note(removed)}",
-                        "ok" if unlocks else "error")
+                        "ok" if unlocks else "error", TAB_LOCK)
         return final
 
     def do_decrypt(self):
@@ -883,7 +1019,7 @@ class App:
         self._last_op = {"mode": "unlock", "clean": clean, "middle": middle, "final": plain,
                          "key": key, "rails": rails}
         self.set_status(f"Done in {elapsed_ms:.2f} ms.{self._removed_note(removed)}",
-                        "ok" if relocks else "error")
+                        "ok" if relocks else "error", TAB_LOCK)
         return plain
 
     def move_output_to_input(self):
@@ -896,7 +1032,7 @@ class App:
         self._clear_outputs()
         self.inline_var.set("")
         self._last_op = None
-        self.set_status("Moved the output into the message box.", "info")
+        self.set_status("Moved the output into the message box.", "info", TAB_LOCK)
         return True
 
     def copy_output(self):
@@ -908,7 +1044,7 @@ class App:
         self.root.clipboard_clear()
         self.root.clipboard_append(final)
         self.inline_var.set("")
-        self.set_status(f"Copied {len(final)} letters to the clipboard.", "ok")
+        self.set_status(f"Copied {len(final)} letters to the clipboard.", "ok", TAB_LOCK)
         return True
 
     # ---- Show Working window ----
@@ -963,6 +1099,7 @@ class App:
         # Two sub-pages keep each one small enough to see without scrolling.
         sub = ttk.Notebook(tab)
         sub.pack(fill="both", expand=True)
+        self.attack_sub = sub                       # the guided tour switches between its two pages
         one = ttk.Frame(sub, padding=8)
         many = ttk.Frame(sub, padding=8)
         sub.add(one, text="  Try one attack  ")
@@ -989,11 +1126,11 @@ class App:
         ttk.Radiobutton(src, text="Make a test message for me", variable=self.source_var,
                         value="test").grid(row=0, column=0, columnspan=2, sticky="w")
         tk.Label(src, text="    Message length (letters):", bg=BG, font=FONT_LABEL).grid(row=1, column=0, sticky="w")
-        self.n_var = tk.StringVar(value=str(attack.TEXT_LENGTHS[2]))
-        ttk.Combobox(src, textvariable=self.n_var, values=[str(n) for n in attack.TEXT_LENGTHS],
-                     state="readonly", width=8).grid(row=1, column=1, sticky="w")
-        tk.Label(src, text="    (a random piece of the test text, a random key and random rails;\n"
-                           "     the answer stays hidden until you press Reveal truth)",
+        self.n_var = tk.StringVar(value=str(DEFAULT_TEST_LENGTH))
+        self.n_combo = ttk.Combobox(src, textvariable=self.n_var, values=[str(n) for n in attack.TEXT_LENGTHS],
+                                    state="readonly", width=8)
+        self.n_combo.grid(row=1, column=1, sticky="w")
+        tk.Label(src, text="    Random text, key and rails; the answer stays hidden.",
                  bg=BG, fg=MUTED, font=FONT_SMALL, justify="left").grid(row=2, column=0, columnspan=2, sticky="w")
         ttk.Radiobutton(src, text="Paste my own ciphertext", variable=self.source_var,
                         value="paste").grid(row=3, column=0, columnspan=2, sticky="w", pady=(6, 0))
@@ -1118,7 +1255,7 @@ class App:
         self._attack_note = note
         self.attack_button.configure(state="disabled")
         self.attack_bar.start(12)
-        self.set_status(f"{note}: attack running ...", "info")
+        self.set_status(f"{note}: attack running ...", "info", TAB_ATTACK)
         return self._start_job("attack", lambda: self._attack_job(which, ciphertext, crib))
 
     @staticmethod
@@ -1138,7 +1275,7 @@ class App:
         found, ms = payload["found"], payload["ms"]
         if not found["ok"]:
             self.attack_inline_var.set(found["error"][0].upper() + found["error"][1:] + ".")
-            self.set_status("The attack could not run - see the red message.", "error")
+            self.set_status("The attack could not run - see the red message.", "error", TAB_ATTACK)
             return
         self.result_vars["rails"].set(str(found["rails"]))
         self.result_vars["key"].set(found["key"])
@@ -1155,7 +1292,7 @@ class App:
             self.correct_label.configure(fg=GREEN if correct else RED)
             self.reveal_button.configure(state="normal")
             message += " Press Reveal truth to compare."
-        self.set_status(message, "ok")
+        self.set_status(message, "ok", TAB_ATTACK)
 
     def reveal_truth(self):
         """Show the hidden key, rails and the start of the real message."""
@@ -1168,7 +1305,7 @@ class App:
 
     # ---- experiments ----
 
-    EXP_TIP = "Tip: 'Load saved full results' shows the 100-trial numbers instantly."
+    EXP_TIP = "Tip: 'Load saved full results' shows the saved run instantly."
 
     def _build_experiments(self, page):
         page.columnconfigure(0, weight=1)
@@ -1186,7 +1323,9 @@ class App:
         self.exp_run.pack(side="left", padx=8)
         self.exp_cancel = ttk.Button(controls, text="Cancel", command=self.cancel_experiments, state="disabled")
         self.exp_cancel.pack(side="left")
-        self.exp_bar = ttk.Progressbar(controls, mode="determinate", length=160, maximum=17)
+        # One step per table row: Table 1 and Table 2 have one row per message length, Table 3 one per crib size.
+        rows_in_all_tables = 2 * len(attack.TEXT_LENGTHS) + len(attack.CRIB_SIZES)
+        self.exp_bar = ttk.Progressbar(controls, mode="determinate", length=160, maximum=rows_in_all_tables)
         self.exp_bar.pack(side="left", padx=10)
 
         # Row 1: the file buttons, and ONE note line that shows the progress text,
@@ -1207,8 +1346,9 @@ class App:
         scrollbar.grid(row=2, column=1, sticky="ns")
         inner.columnconfigure(0, weight=1)
         self.attack_trees = {}
-        specs = [("table1", "Table 1: frequency attack (ciphertext only)", "N", 6),
-                 ("table2", f"Table 2: known-plaintext attack, crib M = {attack.DEFAULT_CRIB}", "N", 6),
+        by_length = len(attack.TEXT_LENGTHS)              # tables 1 and 2 have one row per message length
+        specs = [("table1", "Table 1: frequency attack (ciphertext only)", "N", by_length),
+                 ("table2", f"Table 2: known-plaintext attack, crib M = {attack.DEFAULT_CRIB}", "N", by_length),
                  ("table3", f"Table 3: known-plaintext attack vs crib size, N = {attack.TABLE3_LENGTH}", "crib M", 5)]
         row = 0
         for name, title, first, height in specs:
@@ -1248,7 +1388,7 @@ class App:
         self.exp_bar.configure(value=0)
         self._exp_say(f"working ({trials} trials per row) ...")
         self.set_status(f"Running the experiments with {trials} trials per row. "
-                        "You can keep using the other tabs.", "info")
+                        "You can keep using the other tabs.", "info", TAB_ATTACK)
 
         def progress(done, total):
             # Runs in the worker thread: report, then stop if the user pressed Cancel.
@@ -1264,7 +1404,7 @@ class App:
             self._cancel["exp"].set()
             self.exp_cancel.configure(state="disabled")
             self._exp_say("cancelling - finishing the current row ...")
-            self.set_status("Cancelling: the run stops when the current table row is finished.", "info")
+            self.set_status("Cancelling: the run stops when the current table row is finished.", "info", TAB_ATTACK)
             return True
         return False
 
@@ -1278,7 +1418,8 @@ class App:
         self._fill_attack_trees(results)
         trials = results["table1"][0]["trials"]
         self._exp_finished(f"done ({trials} trials per row)")
-        self.set_status(f"Experiments finished ({trials} trials per row). Use 'Save as CSV...' to keep them.", "ok")
+        self.set_status(f"Experiments finished ({trials} trials per row). Use 'Save as CSV...' to keep them.",
+                        "ok", TAB_ATTACK)
 
     def _exp_finished(self, label, error=False):
         self.exp_run.configure(state="normal")
@@ -1300,7 +1441,7 @@ class App:
         self._fill_attack_trees(results)
         trials = results["table1"][0]["trials"]
         self._exp_say(f"showing saved results ({trials} trials per row)")
-        self.set_status(f"Loaded {os.path.basename(path)}: {trials} trials per row.", "ok")
+        self.set_status(f"Loaded {os.path.basename(path)}: {trials} trials per row.", "ok", TAB_ATTACK)
         return results
 
     def save_attack_csv(self, path=None):
@@ -1329,7 +1470,7 @@ class App:
             self._exp_say(f"Could not save the file: {error}", True)
             return None
         self._exp_say(f"saved {os.path.basename(path)}")
-        self.set_status(f"Saved {path}", "ok")
+        self.set_status(f"Saved {path}", "ok", TAB_ATTACK)
         return path
 
     # ----------------------------------------------------------------------
@@ -1355,10 +1496,8 @@ class App:
         ttk.Button(controls, text="Load saved results", command=self.load_saved_speed_results).pack(side="right")
 
         # ONE note line under the buttons: progress text, or (in red) a plain-English error.
-        self.speed_note_var = tk.StringVar(value="Table A: the Shift cipher against the two-stage cipher "
-                                                 "(median time, ms). A flat 'custom us/char' column means the "
-                                                 "time grows in step with N, i.e. O(N). "
-                                                 "Full takes about a minute.")
+        self.speed_note_var = tk.StringVar(value="Median time per message length. A flat 'custom us/char' "
+                                                 "column means O(N).")
         self.speed_note_label = tk.Label(tab, textvariable=self.speed_note_var, bg=BG, font=FONT_SMALL, fg=MUTED,
                                          anchor="w", justify="left", wraplength=880)
         self.speed_note_label.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 2))
@@ -1383,8 +1522,7 @@ class App:
         self.verdict_box = tk.Text(tab, height=7, wrap="word", font=FONT_SMALL, bg=NEUTRAL_BG, fg=TEXT,
                                    relief="flat", borderwidth=4, state="disabled")
         self.verdict_box.grid(row=4, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        tk.Label(tab, text="Timings depend on this machine. Running the test inside the window adds a little "
-                           "noise; python benchmark.py gives the cleanest numbers.",
+        tk.Label(tab, text="Timings depend on this machine; python benchmark.py gives the cleanest numbers.",
                  bg=BG, font=FONT_SMALL, fg=MUTED, anchor="w").grid(row=5, column=0, columnspan=2, sticky="ew")
         self._redraw_charts()
 
@@ -1403,7 +1541,8 @@ class App:
         self.speed_cancel.configure(state="normal")
         self.speed_bar.configure(value=0, maximum=benchmark.count_cells(settings))
         self._speed_say("working ...")
-        self.set_status("Running the speed test. Please leave the computer alone for the best numbers.", "info")
+        self.set_status("Running the speed test. Please leave the computer alone for the best numbers.", "info",
+                        TAB_EFFICIENCY)
 
         def progress(done, total):
             self._queue.put(("speed", "progress", (done, total)))
@@ -1429,7 +1568,7 @@ class App:
         self._show_speed_results({"table_a": results["table_a"], "fits": results["fits"],
                                   "memory": results["memory"]})
         self._speed_finished("done")
-        self.set_status("Speed test finished.", "ok")
+        self.set_status("Speed test finished.", "ok", TAB_EFFICIENCY)
 
     def _speed_finished(self, label, error=False):
         self.speed_run.configure(state="normal")
@@ -1449,7 +1588,7 @@ class App:
             return None
         self._show_speed_results(data)
         self._speed_say("showing saved results")
-        self.set_status(f"Loaded {os.path.basename(path)}.", "ok")
+        self.set_status(f"Loaded {os.path.basename(path)}.", "ok", TAB_EFFICIENCY)
         return data
 
     def _show_speed_results(self, data):
@@ -1521,6 +1660,160 @@ class App:
         return self._get_text(self.help_text)
 
     # ----------------------------------------------------------------------
+    # ----- GUIDED TOUR (the START HERE button) -----
+    # ----------------------------------------------------------------------
+    # The tour is a purple banner under the header with "Step N of 5", a short
+    # explanation, and Back / Next / Exit tour buttons. Each step switches to
+    # the right tab and then presses the SAME handlers the normal buttons use
+    # (do_encrypt, do_decrypt, run_attack, load_saved_attack_results, ...), so
+    # what you see is real output, never a fake. The tour never writes a file:
+    # the only file actions in these steps are READING the saved result CSVs.
+    # Any number in a banner is read from those CSVs at runtime.
+
+    def _build_tour_banner(self):
+        frame = tk.Frame(self.root, bg=TOUR_BG, highlightbackground=TOUR_EDGE, highlightthickness=2)
+        frame.columnconfigure(0, weight=1)
+        self.tour_title = tk.Label(frame, text="", font=FONT_BOLD, bg=TOUR_BG, fg=TOUR_FG, anchor="w")
+        self.tour_title.grid(row=0, column=0, sticky="w", padx=10, pady=(4, 0))
+        buttons = tk.Frame(frame, bg=TOUR_BG)
+        buttons.grid(row=0, column=1, sticky="e", padx=10, pady=(4, 0))
+        # Small buttons keep the banner low, so it takes as little room as possible.
+        self.tour_back_button = ttk.Button(buttons, text="Back", style="Tour.TButton", command=self.tour_back)
+        self.tour_back_button.pack(side="left")
+        self.tour_next_button = ttk.Button(buttons, text="Next", style="Tour.TButton", command=self.tour_next)
+        self.tour_next_button.pack(side="left", padx=6)
+        ttk.Button(buttons, text="Exit tour", style="Tour.TButton", command=self.tour_exit).pack(side="left")
+        # height=2: always reserve two lines, so the banner keeps the same height from step to step.
+        self.tour_text = tk.Label(frame, text="", font=FONT_LABEL, bg=TOUR_BG, fg=TEXT, anchor="nw",
+                                  justify="left", wraplength=880, height=2)
+        self.tour_text.grid(row=1, column=0, columnspan=2, sticky="ew", padx=10, pady=(0, 4))
+        # Wrap the text to the banner's width, so it never runs off the right edge.
+        frame.bind("<Configure>", lambda e: self.tour_text.configure(wraplength=max(200, e.width - 30)))
+        self._tour_frame = frame
+
+    def start_tour(self):
+        """START HERE: show the banner (under the header) and go to step 1. Starting again restarts."""
+        if self._tour_frame is None:
+            self._build_tour_banner()
+        if self._tour_frame.winfo_manager() != "pack":      # not already showing (a restart keeps it)
+            self._tour_frame.pack(side="top", fill="x", padx=10, pady=(2, 2), before=self.notebook)
+            self._grow_window_for_banner()
+        return self.tour_goto(1)
+
+    def _grow_window_for_banner(self):
+        """Make the window taller by the banner's height, so the tabs keep the room they had.
+
+        Without this the banner would squeeze the tab below it (at the smallest
+        window size the output boxes would shrink to a sliver). The window is
+        only grown if it is a normal window and the screen has room; otherwise
+        the tab simply gets a little less space. tour_exit shrinks it back.
+        """
+        self._tour_grew = 0
+        self.root.update_idletasks()
+        if self.root.state() != "normal" or not self.root.winfo_ismapped():
+            return                                          # maximised, hidden or not shown yet
+        extra = self._tour_frame.winfo_reqheight() + 4      # 4 = the banner's outer padding
+        width, height = self.root.winfo_width(), self.root.winfo_height()
+        room_below = self.root.winfo_screenheight() - self.root.winfo_y() - 60     # 60 = taskbar etc.
+        grown = min(height + extra, room_below)
+        if grown > height:
+            self.root.geometry(f"{width}x{grown}")
+            self._tour_grew = grown - height
+
+    def tour_goto(self, step):
+        """Run tour step `step` (1 to 5): switch tab, press the real buttons, show the banner text."""
+        step = max(1, min(TOUR_STEPS, step))
+        runner = {1: self._tour_step_lock, 2: self._tour_step_unlock, 3: self._tour_step_attack,
+                  4: self._tour_step_experiments, 5: self._tour_step_efficiency}[step]
+        text = runner()
+        self._tour_step = step
+        self.tour_title.configure(text=f"Step {step} of {TOUR_STEPS}")
+        self.tour_text.configure(text=text)
+        self.tour_back_button.configure(state="normal" if step > 1 else "disabled")
+        self.tour_next_button.configure(state="normal" if step < TOUR_STEPS else "disabled")
+        return text
+
+    def tour_next(self):
+        """Go to the next step. Does nothing (returns None) when no tour runs or at the last step."""
+        if self._tour_step is None or self._tour_step >= TOUR_STEPS:
+            return None
+        return self.tour_goto(self._tour_step + 1)
+
+    def tour_back(self):
+        """Go to the previous step. Does nothing (returns None) when no tour runs or at step 1."""
+        if self._tour_step is None or self._tour_step <= 1:
+            return None
+        return self.tour_goto(self._tour_step - 1)
+
+    def tour_exit(self):
+        """Remove the banner. Nothing else changes: the window stays exactly as the tour left it."""
+        if self._tour_frame is not None and self._tour_frame.winfo_manager() == "pack":
+            self._tour_frame.pack_forget()
+            if self._tour_grew and self.root.state() != "zoomed":      # give back the room the banner added
+                smallest = self.root.minsize()[1]
+                self.root.geometry(f"{self.root.winfo_width()}x{max(smallest, self.root.winfo_height() - self._tour_grew)}")
+        self._tour_grew = 0
+        self._tour_step = None
+
+    def tour_running(self):
+        return self._tour_step is not None
+
+    # ---- the five steps (each returns the banner text) ----
+
+    def _tour_lock_sample(self):
+        """Fill the sample message, key and rails and press Lock. Returns the ciphertext (or None)."""
+        self.notebook.select(TAB_LOCK)
+        self.set_message(SAMPLE_MESSAGE)
+        self.key_var.set(SAMPLE_KEY)
+        self.rails_var.set(str(SAMPLE_RAILS))
+        return self.do_encrypt()
+
+    def _tour_step_lock(self):
+        if self._tour_lock_sample() is None:
+            return "The sample could not be locked: " + (self.inline_text() or "see the status bar.")
+        return ("Lock: the blue box is the message after Stage 1 (Vigenere); the orange box is the final "
+                "ciphertext after Stage 2 (Rail Fence). Click Show Working to see the hand calculation.")
+
+    def _tour_step_unlock(self):
+        self._tour_lock_sample()                    # the same state as step 1, so Back / Next always work
+        self.move_output_to_input()                 # the ciphertext becomes the new message
+        plain = self.do_decrypt()
+        original, _ = cipher.sanitize(SAMPLE_MESSAGE)
+        if plain != original:
+            return "Unlock did not give the original message back: " + (self.inline_text() or "see the status bar.")
+        return ("Unlock: the original message is back in the last box, and the green check says it matched "
+                f"(\"{self.check_label.cget('text')}\").")
+
+    def _tour_step_attack(self):
+        self.notebook.select(TAB_ATTACK)
+        self.attack_sub.select(0)
+        self.source_var.set("test")
+        self.attack_var.set("freq")
+        self.n_var.set(str(DEFAULT_TEST_LENGTH))
+        self.run_attack()                           # runs in the background; the result appears in a moment
+        if self.attack_inline_var.get():
+            return "The attack could not start: " + self.attack_inline_var.get()
+        return ("Attack: the attacker saw only the ciphertext, never the key. When the result appears, "
+                "click Reveal truth to compare it with the real answer.")
+
+    def _tour_step_experiments(self):
+        self.notebook.select(TAB_ATTACK)
+        self.attack_sub.select(1)
+        results = self.load_saved_attack_results()
+        text = experiments_banner(results)
+        if text is None:                            # the file is missing or unreadable: say so, show no numbers
+            return "No saved experiment results could be shown. " + self.exp_note_var.get()
+        return text
+
+    def _tour_step_efficiency(self):
+        self.notebook.select(TAB_EFFICIENCY)
+        data = self.load_saved_speed_results()
+        text = efficiency_banner(data)
+        if text is None:
+            return "No saved speed results could be shown. " + self.speed_note_var.get()
+        return text
+
+    # ----------------------------------------------------------------------
     # ----- background jobs (worker thread + queue) -----
     # ----------------------------------------------------------------------
     # A slow job runs in a worker thread so the window never freezes. The
@@ -1568,7 +1861,7 @@ class App:
                 self._exp_finished("cancelled")
             else:
                 self._speed_finished("cancelled")
-            self.set_status("Cancelled. Nothing was changed.", "info")
+            self.set_status("Cancelled. Nothing was changed.", "info", TAB_EFFICIENCY if job == "speed" else TAB_ATTACK)
         elif kind == "error":
             if job == "attack":
                 self.attack_bar.stop()
@@ -1578,7 +1871,8 @@ class App:
                 self._exp_finished(f"Stopped by an error: {payload}", error=True)
             else:
                 self._speed_finished(f"Stopped by an error: {payload}", error=True)
-            self.set_status("Something went wrong - see the red message.", "error")
+            self.set_status("Something went wrong - see the red message.", "error",
+                            TAB_EFFICIENCY if job == "speed" else TAB_ATTACK)
 
     def is_busy(self):
         return any(self._busy.values())
@@ -1614,7 +1908,10 @@ class App:
 # ==========================================================================
 
 def main():
-    """Open the window. Exits with a plain message if there is no display."""
+    """Open the window. Exits with one plain line (no traceback) if tkinter or a display is missing."""
+    if tk is None:
+        raise SystemExit("This program needs tkinter, which is not installed with this Python "
+                         f"({TKINTER_ERROR}). Install it (on Linux: the python3-tk package) and try again.")
     try:
         import ctypes                                # sharper text on Windows high-DPI screens
         ctypes.windll.shcore.SetProcessDpiAwareness(1)

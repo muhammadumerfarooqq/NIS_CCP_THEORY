@@ -26,6 +26,7 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Viva defence:** A minimum key length of 10 raises the amount of ciphertext an attacker needs, and the Rail Fence stage scrambles letter positions so the period is not directly visible in the ciphertext. This is a mitigation, not a cure.
 - **Planned fix:** Implement the attacks in a later step and measure how much ciphertext is needed to break keys of different lengths, with and without Rail Fence.
 - **Step 2 evidence:** The ciphertext-only frequency attack (undo Rail Fence for each of 9 rails values, then Index of Coincidence + chi-squared) broke 100 % of random 10..20-letter keys from 1000 letters of text upward, 84 % at 500 letters and 22 % at 250 (100 trials per row, seed 486). So Rail Fence does not hide the Vigenere period from an attacker who can try every rails value. Still to do: the comparison without Rail Fence.
+- **Phase 6 note:** The Step 2 figures above (84 % at 500, 22 % at 250) are from the Step 2 run. After N = 50 was added in Phase 6 the full run was repeated and every row was drawn afresh: 89 % at 500, 29 % at 250, 0 % at 100 and at 50, still 100 % from 1000 upward. See L40.
 - **Status:** OPEN (attack implemented in Step 2; comparison without Rail Fence still to do)
 
 ## L4. Classical ciphers are not secure against modern attacks
@@ -46,7 +47,8 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Viva defence:** The spec defines validity as letters-only and >= 10 letters; judging key quality is a separate problem and is warned about here and in L3.
 - **Planned fix:** Add a key-strength warning (repeated pattern, low letter variety) in the GUI step.
 - **Phase 5 note:** NOT done. The Phase 5 specification did not include a key-strength warning, so the GUI accepts `AAAAAAAAAA` like `validate_key` does (the live counter only checks letters and length). The planned fix is still wanted.
-- **Status:** OPEN
+- **Phase 6 fix:** Done as a WARNING ONLY. When the key has fewer than 4 different letters (for example `AAAAAAAAAA` or `ABABABABAB`) the Encrypt & Decrypt tab shows an orange note under the key box: "Weak key: very few different letters. Allowed, but easy to break." Locking still works and `validate_key` is unchanged, so such keys are still accepted (tests check both). The test is only a count of different letters, so a longer repeating pattern with 4 or more different letters (for example `ABCDABCDABCD`) is not flagged: see L43.
+- **Status:** SOLVED in Phase 6 (as a warning only; weak keys are still allowed, by design)
 
 ## L7. Deterministic, no IV, no integrity protection
 - **Limitation:** The same plaintext, key and rails always give the same ciphertext. There is no nonce/IV and no authentication, so ciphertext can be modified undetected and equal messages are recognisable.
@@ -105,13 +107,13 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Status:** OPEN
 
 ## L15. The frequency attack needs enough text per key letter
-- **Limitation:** Each key letter is solved from only about N / key-length ciphertext letters. With short messages the statistics are too noisy: in the full run the exact-break rate is 0 % at N = 100, 22 % at 250 and 84 % at 500, and 100 % from 1000 upward. At N = 100 the recovered rails value is right only 13 % of the time, close to chance (1 in 9).
+- **Limitation:** Each key letter is solved from only about N / key-length ciphertext letters. With short messages the statistics are too noisy: in the full run (Phase 6) the exact-break rate is 0 % at N = 50 and at N = 100, 29 % at 250 and 89 % at 500, and 100 % from 1000 upward. The recovered rails value is right 11 % of the time at N = 50 (chance is 1 in 9, about 11 %) and 5 % at N = 100 (at or below chance). In the earlier Phase 5 run the same rows were 0 %, 22 % and 84 %, with rails right 13 % of the time at N = 100; the rows differ only because the random trials were redrawn (L40).
 - **Viva defence:** This is the expected behaviour of any statistical attack and is itself a finding: short messages are meaningfully harder to break. It is reported honestly, not tuned away.
 - **Planned fix:** Report the minimum ciphertext length for a given success rate in the final analysis; possibly add a dictionary/n-gram score to help on short texts.
 - **Status:** OPEN
 
 ## L16. The known-plaintext attack needs a crib at least as long as the key
-- **Limitation:** The attack derives only M key-stream letters from an M-letter crib, so it can only build keys up to length M. At N = 500 it succeeded 12 % of the time with M = 10, 56 % with M = 15, 100 % with M = 20 and 100 % with M >= 30 (keys were 10..20 letters, English plaintext; current numbers. An intermediate Phase 3 version briefly gave 47 % and 95 % at M = 15 and 20, see L26). It also assumes the crib is the very start of the message (positions 0..M-1) and is already cleaned to A-Z; a crib found elsewhere in the text, or one containing spaces, is not handled.
+- **Limitation:** The attack derives only M key-stream letters from an M-letter crib, so it can only build keys up to length M. At N = 500 it succeeded 12 % of the time with M = 10, 59 % with M = 15, 100 % with M = 20 and 100 % with M >= 30 (keys were 10..20 letters, English plaintext; Phase 6 run. The Phase 5 run gave 56 % at M = 15; the difference is the redrawn trials, L40. An intermediate Phase 3 version briefly gave 47 % and 95 % at M = 15 and 20, see L26). It also assumes the crib is the very start of the message (positions 0..M-1) and is already cleaned to A-Z; a crib found elsewhere in the text, or one containing spaces, is not handled.
 - **Viva defence:** If the crib is shorter than the key, part of the key stream is simply unknown, so no method could recover it from the crib alone. The start-of-message assumption matches the specification for this step.
 - **Planned fix:** Extend to a crib at a known or unknown position (try every offset) if time allows.
 - **Status:** OPEN
@@ -133,6 +135,7 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** Each table row uses 100 trials (10 with `--quick`) and one seed (486), so a percentage such as 84 % carries a sampling error of several points. Results are reproducible given the same Python version, but are one sample, not a long-run average.
 - **Viva defence:** Fixing the seed makes every number checkable; the trends (a sharp rise between N = 250 and 1000) are far larger than the sampling error.
 - **Planned fix:** Add more trials or confidence intervals if the final report needs tighter numbers.
+- **Phase 6 note:** A concrete example: re-drawing the trials moved the frequency attack at N = 500 from 84 % to 89 % and at N = 250 from 22 % to 29 %, with nothing about the attack changed (L40).
 - **Status:** OPEN
 
 ## L20. Design choices inside the frequency attack are fixed, not optimised
@@ -182,6 +185,7 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Viva defence:** With no repeat to check, the crib cannot prove anything about the key length, so an honest attack must either guess or admit it does not know. The ranking was fixed in advance and deliberately not adjusted after seeing the results. The trade is clear: the attack now works on any plaintext when the crib is longer than the key, and is slightly worse than before when the crib length equals the key length.
 - **Planned fix:** Done in Phase 3 (second change). A candidate now counts as "verified" only if it has zero violations AND at least `MIN_CHECKS = 3` checks (a random stream passes 3 checks by chance with probability 1/26^3, giving about 0.008 expected false positives over the 144 candidates; the constant was fixed before the run). If any candidate is verified, the smallest-L verified one wins; if none is, the attack falls back to the English chi-squared score over all candidates, as in Step 2. A zero-check candidate is therefore no longer ranked as "worst".
 - **Result:** Table 3 (N = 500, 100 trials, seed 486) went from 47 % to 56 % at M = 15 and from 95 % to 100 % at M = 20, i.e. back to the Step 2 numbers, while keeping the Phase 3 gain on non-English plaintext. Nothing got worse; Table 2 is unchanged at 100 %.
+- **Phase 6 note:** The 47 % and 56 % above are the numbers of that run. In the Phase 6 re-run Table 3 gives 59 % at M = 15 and 100 % at M = 20, because the trials were redrawn (L40); the conclusion is unchanged.
 - **Status:** SOLVED in Phase 3 (for crib length >= key length + 3). The remaining cases, M <= key length + 2, are tracked in L28.
 
 ## L27. Comments can drift away from the code
@@ -270,3 +274,39 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Viva defence:** Reusing the very function that produces the experiment trials guarantees the GUI's test messages are made exactly like the ones in the tables. Repeatability is available from the command line, where the seed is fixed (486).
 - **Planned fix:** Make that helper public (rename it without the underscore) in a later change, and optionally add a "use seed" box.
 - **Status:** OPEN
+
+---
+
+# Added in Phase 6 (a simpler GUI)
+
+Tab names changed in Phase 6, so entries written earlier use the old names: Lock / Unlock is now "Req 2 \· Encrypt & Decrypt", Break It is "Req 3 \· Deliverable 2 \· Attack", Speed Test is "Req 4 \· Efficiency" and How It Works is "Req 1 \· Deliverable 1 \· Design".
+
+## L40. Adding N = 50 redrew every random trial, so the old attack numbers moved
+- **Limitation:** The experiments share one random generator (seed 486) and run their rows in order, so putting a 50-letter row first changed the random messages, keys and rails of every other row. The full run was repeated and `results/attack_results.csv` replaced. Frequency attack (Table 1), exact break, before then after: N = 100: 0 % then 0 %; N = 250: 22 % then 29 %; N = 500: 84 % then 89 %; 1000 and up: 100 % both. Key-letter accuracy at N = 100 went DOWN, from 10.0 % to 5.9 %, and the rails found at N = 100 from 13 % to 5 %; at N = 250 key accuracy went up (84.6 % to 86.7 %) and rails 94 % to 95 %, and at N = 500 key accuracy went up (98.9 % to 99.3 %). Known-plaintext attack (Table 2): 100 % in every row both times. Table 3 (N = 500): crib 15 from 56 % to 59 %, crib 10 from 12 % to 12 % (rails found 48 % to 47 %, one point lower), crib 20 and up 100 % both times. Nothing was tuned after seeing the numbers.
+- **Viva defence:** Each row is one sample of 100 trials with a sampling error of several points (L19), so movements of 3 to 7 points are what re-sampling alone produces, and the conclusions (short messages are hard, 1000 letters or more is always broken, a crib of 20 or more always works) did not change. The change is recorded rather than hidden.
+- **Planned fix:** Give each row its own seed derived from the row (so adding a row never changes the others), and/or add confidence intervals.
+- **Status:** OPEN
+
+## L41. The N = 50 row is a corner case, not a general result
+- **Limitation:** At N = 50 the frequency attack breaks 0 % of messages and finds the rails 11 % of the time (about chance, 1 in 9): each key letter is solved from about 3 ciphertext letters, so the statistics carry almost no information. The known-plaintext attack shows 100 % at N = 50 with a crib of 30, but that crib is 60 % of the whole message, so the remaining 20 letters are checked against a key stream that is almost entirely known; it is not evidence that the attack is strong on very short messages with a short crib.
+- **Viva defence:** The row is there to show where the attacks stop working (frequency) and how little a crib needs to be (known-plaintext), and it is labelled by its N like every other row.
+- **Planned fix:** If the report needs it, also run Table 2 with the crib as a fixed fraction of N instead of a fixed 30 letters.
+- **Status:** ACCEPTED
+
+## L42. The guided tour changes the screen and uses a random attack message
+- **Limitation:** START HERE replaces whatever is in the message, key and rails boxes with the sample (the tour must always show the same lock and unlock), clears the output boxes, and starts a real frequency attack on a new random 500-letter test message, so step 3 shows a different key and rails each time and (roughly one time in ten at 500 letters) the attack may be wrong. The banner for step 3 appears before the attack has finished. Steps 4 and 5 need `results/attack_results.csv` and `results/benchmark_results.csv`; if a file is missing the banner says so and shows no numbers. Exit tour leaves everything as the tour left it; it does not restore what the user had typed. Nothing is written to disk by the tour (tests check this).
+- **Viva defence:** Using the real buttons, not canned output, is the point of the tour; a wrong attack result is itself a useful thing to show and is explained by the Reveal truth button. The key is the public sample key, never a key the user typed.
+- **Planned fix:** Remember and restore the user's own inputs when the tour ends; optionally use a fixed seed for the tour's attack.
+- **Status:** OPEN
+
+## L43. The weak-key warning is a simple count, and it appears while typing
+- **Limitation:** The orange note only counts different letters (fewer than 4). A key such as `ABCDABCDABCD` (period 4) or a repeated short word with 4 or more different letters is not flagged although it is also weak. The note is shown as soon as at least one letter has been typed, so it can flash briefly on the first three letters of a good key before a fourth different letter is typed. It never blocks anything.
+- **Viva defence:** The specification asked for exactly this rule. The note's wording says "allowed, but easy to break", and L3 and L6 explain why short periods are weak.
+- **Planned fix:** Also flag a key that is a repeat of a shorter block, and show the note only once the key reaches the minimum length.
+- **Status:** OPEN
+
+## L44. Tab names are fitted once, when the window opens
+- **Limitation:** The window measures the long tab names against the smallest window width (950 pixels) with the real font when it starts, and uses the shorter names if they would not fit. It does not measure again if the text size of the display changes while the program is running. The tab names are plain labels; nothing in the program depends on them.
+- **Viva defence:** The window has a minimum size, so one measurement at start-up is enough in normal use; the screenshots at 950 x 680 show all four names whole.
+- **Planned fix:** Measure again on a font or scale change, or let the tab bar scroll.
+- **Status:** ACCEPTED

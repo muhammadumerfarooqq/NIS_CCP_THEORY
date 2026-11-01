@@ -101,7 +101,7 @@ RESULTS_PATH_QUICK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "r
 
 # Experiment settings: message lengths to test, crib sizes to test, and the
 # fixed crib size / message length used by Table 2 and Table 3.
-TEXT_LENGTHS = [100, 250, 500, 1000, 2500, 5000]
+TEXT_LENGTHS = [50, 100, 250, 500, 1000, 2500, 5000]      # 50 added in Phase 6 (a very short message)
 CRIB_SIZES = [10, 15, 20, 30, 40]
 DEFAULT_CRIB = 30
 TABLE3_LENGTH = 500

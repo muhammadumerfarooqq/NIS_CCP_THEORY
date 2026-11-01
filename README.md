@@ -12,6 +12,7 @@ Python 3, standard library only (no pip installs).
 | 3 | Attack hardening (known-plaintext attack no longer relies on English scoring) and beginner-friendly comments in `cipher.py` and `attack.py` | Done |
 | 4 | Benchmarks and complexity evidence (`benchmark.py`): timings, log-log fits, memory | Done |
 | 5 | Desktop GUI (`gui.py`): lock/unlock with working shown, attacks, speed test, explanations | Done |
+| 6 | Simpler GUI: tabs named after the requirements, a START HERE guided tour, shorter on-screen text, a weak-key warning, N = 50 added to the attack experiments | Done |
 
 ### Step 1 — what exists
 
@@ -55,6 +56,18 @@ Python 3, standard library only (no pip installs).
 - Tests: `tests/test_explain.py`, `tests/test_gui_helpers.py` (no display needed), `tests/test_gui_smoke.py` (builds the window hidden; skipped, not failed, if there is no display), `tests/test_progress.py`.
 - `.gitignore` also ignores `results/*_gui.csv` (files you save from the GUI).
 
+### Phase 6 — what changed
+
+The cipher and its results are the same; the window is simpler to follow.
+
+- **Tabs renamed** after the course requirements: Req 2 · Encrypt & Decrypt, Req 3 · Deliverable 2 · Attack, Req 4 · Efficiency, Req 1 · Deliverable 1 · Design (same order as before). The window measures the names against the smallest window size and switches to shorter names (`Req 2: Encrypt/Decrypt`, ...) if the long ones would be cut off.
+- **START HERE** (top bar, left of Run Self-Test): a five-step guided tour. A purple banner shows "Step N of 5" with a short explanation and Back, Next and Exit tour buttons, and the window switches tabs for you. The tour presses the same handlers as the normal buttons (no fake output), reads the saved result files for steps 4 and 5 (every number in those banners comes from the CSV files; if a file is missing the banner says so), and never writes a file.
+- **Shorter on-screen text:** each section keeps one short hint line; the longer explanations moved to the Design tab ("The notes on the other tabs, in full"). The status bar now shows a different "Ready" message on each tab and remembers what each tab last said.
+- **N = 50 added** to the attack experiments (`attack.TEXT_LENGTHS` is now 50, 100, 250, 500, 1000, 2500, 5000) and to the test-message lengths in the Attack tab. The full 100-trial run was repeated, so `results/attack_results.csv` has new numbers (see "Attack results" below).
+- **Weak-key note:** a key with fewer than 4 different letters (for example `AAAAAAAAAA`) shows an orange note under the key box. It is only a warning: the key is still accepted and Lock still works.
+- **No tkinter:** `python gui.py` prints one friendly line and exits; `tests/test_gui_helpers.py`, `tests/test_gui_smoke.py` and `tests/test_gui_tour.py` are skipped, not errored.
+- New tests: `tests/test_gui_tour.py` (tour steps, Back/Next/Exit, nothing written to disk, tab names, per-tab status, weak-key note) and `tests/test_phase6.py` (N = 50, weak-key and banner texts, the Design notes, behaviour without tkinter). A few existing tests were edited only where they hard-coded the old list of text lengths, the old row/cell counts (17 became 19) or the old tab names.
+
 ## The GUI
 
 Start it with:
@@ -65,12 +78,12 @@ python gui.py
 
 | Tab | What you can do |
 |-----|-----------------|
-| Lock / Unlock | Type or load a message, enter a key (letters only, at least 10, with a live counter) and the number of rails (2 to 10; two separate inputs), then press Lock or Unlock (Enter in the key box also locks). You see the cleaned text, the result after Stage 1 (Vigenere, blue), and the final result after Stage 2 (Rail Fence, orange), a check that it unlocks back to the original, and the time taken. **Show Working** opens the letter-by-letter Vigenere table and the Rail Fence zigzag grid. Mistakes appear as a red message under the buttons, never as a pop-up. |
-| Break It | **Try one attack:** make a test message (the answer stays hidden until you press Reveal truth) or paste your own ciphertext, then run the frequency attack or the known-plaintext attack. **Run the experiments:** the three attack tables with a progress bar and Cancel, "Save as CSV..." (through a Save dialog), and "Load saved full results" to show the 100-trial numbers instantly. |
-| Speed Test | Run the benchmark (with progress and Cancel) or load the saved results; shows Table A, two line charts, the log-log slopes and R-squared, and the memory numbers. |
-| How It Works | A plain-English explanation of both stages, the complexity, the two attacks and the main limitations, plus the measured results read from the CSV files. |
+| Req 2 · Encrypt & Decrypt | Type or load a message, enter a key (letters only, at least 10, with a live counter) and the number of rails (2 to 10; two separate inputs), then press Lock or Unlock (Enter in the key box also locks). You see the cleaned text, the result after Stage 1 (Vigenere, blue), and the final result after Stage 2 (Rail Fence, orange), a check that it unlocks back to the original, and the time taken. **Show Working** opens the letter-by-letter Vigenere table and the Rail Fence zigzag grid. Mistakes appear as a red message under the buttons, never as a pop-up. A key with fewer than 4 different letters gets an orange "weak key" note (still allowed). |
+| Req 3 · Deliverable 2 · Attack | **Try one attack:** make a test message (50 to 5,000 letters; the answer stays hidden until you press Reveal truth) or paste your own ciphertext, then run the frequency attack or the known-plaintext attack. **Run the experiments:** the three attack tables with a progress bar and Cancel, "Save as CSV..." (through a Save dialog), and "Load saved full results" to show the saved 100-trial numbers instantly. |
+| Req 4 · Efficiency | Run the benchmark (with progress and Cancel) or load the saved results; shows Table A, two line charts, the log-log slopes and R-squared, and the memory numbers. |
+| Req 1 · Deliverable 1 · Design | A plain-English explanation of both stages, the complexity, the two attacks, the main limitations and the longer notes from the other tabs, plus the measured results read from the CSV files. |
 
-The top bar has a **Run Self-Test** button: it checks the cipher against the known lecture answers and 300 seeded random lock/unlock round trips, and shows PASS or FAIL with the time taken.
+The top bar has a **START HERE** button (the five-step guided tour described above) and a **Run Self-Test** button: it checks the cipher against the known lecture answers and 300 seeded random lock/unlock round trips, and shows PASS or FAIL with the time taken.
 
 Safety: the GUI uses no network and no local server, never uses `eval`/`exec`, never saves your key anywhere, and writes a file only through a Save dialog that you confirm. It refuses to overwrite the protected result files (`results/attack_results.csv`, `results/benchmark_results.csv` and their `_quick` versions). Experiments and speed tests run in a background thread so the window never freezes.
 
@@ -130,12 +143,15 @@ Text lengths are letters. Keys are random, length 10..20; rails random, 2..10.
 
 | N | Frequency attack: exact break | Known-plaintext (crib 30): exact break |
 |------|------|------|
+| 50 | 0 % | 100 % |
 | 100 | 0 % | 100 % |
-| 250 | 22 % | 100 % |
-| 500 | 84 % | 100 % |
+| 250 | 29 % | 100 % |
+| 500 | 89 % | 100 % |
 | 1000 and up | 100 % | 100 % |
 
-Known-plaintext attack against crib size (N = 500, English plaintext): crib 10 gives 12 %, 15 gives 56 %, 20 and above give 100 %. The attack cannot work when the crib is shorter than the key. It now also works on plaintext that is not English as long as the crib is at least 3 letters longer than the key: with random-letter plaintext and a crib of 30, 20 of 20 test messages are recovered exactly (it was 0 of 20 before Phase 3). With a shorter crib it falls back to English scoring; in a separate check on random-letter plaintext, a crib of 20 recovered about 74 % and a crib of 15 about 29 % (see L28 in `docs/LIMITATIONS.md`). Full tables, including accuracy, rails-correct, time and guesses, are printed by `python attack.py` and saved in `results/attack_results.csv`. Timings depend on the machine. These numbers come from the author's own corpus; see `docs/LIMITATIONS.md` for what that does and does not show.
+(These are the numbers in `results/attack_results.csv` after the Phase 6 re-run, which added N = 50. Adding a row changes the order in which the random trials are drawn, so every row was drawn afresh; the Phase 5 file had 22 % at N = 250 and 84 % at N = 500 for the frequency attack. Differences of a few points are ordinary sampling noise for 100 trials; see L19 and L40 in `docs/LIMITATIONS.md`.)
+
+Known-plaintext attack against crib size (N = 500, English plaintext): crib 10 gives 12 %, 15 gives 59 %, 20 and above give 100 %. The attack cannot work when the crib is shorter than the key. It now also works on plaintext that is not English as long as the crib is at least 3 letters longer than the key: with random-letter plaintext and a crib of 30, 20 of 20 test messages are recovered exactly (it was 0 of 20 before Phase 3). With a shorter crib it falls back to English scoring; in a separate check on random-letter plaintext, a crib of 20 recovered about 74 % and a crib of 15 about 29 % (see L28 in `docs/LIMITATIONS.md`). Full tables, including accuracy, rails-correct, time and guesses, are printed by `python attack.py` and saved in `results/attack_results.csv`. Timings depend on the machine. These numbers come from the author's own corpus; see `docs/LIMITATIONS.md` for what that does and does not show.
 
 ## Usage
 
@@ -170,7 +186,7 @@ Both print the three tables. A full run writes `results/attack_results.csv`; a `
 python gui.py
 ```
 
-It needs a desktop display (tkinter 8.6 ships with the standard Python installer for Windows). If there is no display it says so and exits.
+It needs tkinter and a desktop display (tkinter 8.6 ships with the standard Python installer for Windows). If tkinter or the display is missing it prints one plain line saying so and exits, with no traceback. Click **START HERE** for a guided tour.
 
 ## Running the benchmarks
 

@@ -6,6 +6,11 @@ import os
 import tempfile
 import unittest
 
+try:
+    import tkinter       # this file tests gui.py, which is only useful with tkinter
+except ImportError as error:
+    raise unittest.SkipTest(f"tkinter is not installed: {error}")
+
 import attack
 import benchmark
 import cipher
@@ -76,9 +81,9 @@ class TestSmallHelpers(unittest.TestCase):
 class TestCsvReaders(unittest.TestCase):
     def test_read_the_real_attack_csv(self):
         data = gui.read_attack_csv()
-        self.assertEqual([len(data[t]) for t in ("table1", "table2", "table3")], [6, 6, 5])
+        self.assertEqual([len(data[t]) for t in ("table1", "table2", "table3")], [7, 7, 5])
         first = data["table1"][0]
-        self.assertEqual(first["text_length"], 100)
+        self.assertEqual(first["text_length"], 50)
         self.assertEqual(first["crib"], "")
         self.assertIsInstance(first["exact_pct"], float)
         self.assertEqual(data["table3"][0]["crib"], 10)

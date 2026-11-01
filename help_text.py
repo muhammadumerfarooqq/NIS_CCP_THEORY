@@ -83,6 +83,39 @@ COMPLEXITY_TEXT = (
     "tab measures this, and the measured numbers are shown at the bottom of this page."
 )
 
+SCREEN_NOTES_TITLE = "The notes on the other tabs, in full"
+SCREEN_NOTES_TEXT = (
+    "The other tabs keep their hints to one short line. The longer explanations live here.\n\n"
+    "START HERE (top right)\n"
+    "  Starts a five-step tour: it locks and unlocks the sample message, runs one attack, "
+    "then shows the saved experiment and speed results. It presses the same buttons you "
+    "would press yourself, so what it shows is real output. Back, Next and Exit tour "
+    "control it. The tour never writes a file.\n\n"
+    "Encrypt & Decrypt tab\n"
+    "  Only the letters A-Z are used. Spaces, digits, punctuation and accents are removed "
+    "when you lock, and they cannot be brought back when you unlock. The window tells you "
+    "how many characters were removed.\n"
+    "  The key may contain only letters, and it needs at least the minimum length. A key "
+    "with fewer than four different letters (for example AAAAAAAAAA) is still accepted, "
+    "because it is a valid key, but the window shows an orange warning: such a key hardly "
+    "changes the text, so the cipher is easy to break.\n\n"
+    "Attack tab\n"
+    "  'Make a test message for me' takes a random piece of the test text and locks it "
+    "with a random key and a random number of rails. The answer stays hidden until you "
+    "press Reveal truth, so you see what the attacker saw: the ciphertext, and for the "
+    "known-plaintext attack also the crib (the first letters of the message).\n"
+    "  The experiments page runs the three tables. Quick uses fewer trials and is fast; "
+    "Full uses the full number of trials and is slow. 'Load saved full results' shows the "
+    "saved full run at once. Each row is a success rate over many random trials at one "
+    "message length (the third table varies the crib size instead).\n\n"
+    "Efficiency tab\n"
+    "  Table A compares the Shift cipher with the two-stage cipher: the median time for "
+    "each message length. If the 'custom us/char' column stays roughly flat, the time grows "
+    "in step with N, which is O(N). Full measures larger messages than Quick, so it is "
+    "slow. Timings depend on the machine, and running the test inside the window adds a "
+    "little noise; running  python benchmark.py  gives the cleanest numbers."
+)
+
 ATTACKS_TITLE = "The two attacks, in plain words"
 
 
@@ -147,7 +180,7 @@ LIMITATIONS_TITLE = "The main limitations (honest list)"
 RESULTS_TITLE = "Measured results (read from the results files each time you open this tab)"
 
 # The names of all static text blocks, so a test can check them for results.
-STATIC_TEXT_BLOCKS = [WHAT_IT_DOES, STAGE1_TEXT, STAGE2_TEXT, ORDER_TEXT, COMPLEXITY_TEXT]
+STATIC_TEXT_BLOCKS = [WHAT_IT_DOES, STAGE1_TEXT, STAGE2_TEXT, ORDER_TEXT, COMPLEXITY_TEXT, SCREEN_NOTES_TEXT]
 
 
 # ==========================================================================
@@ -231,6 +264,8 @@ def build_help_document(attack_data=None, speed_data=None):
         ("body", attacks_text()),
         ("heading", LIMITATIONS_TITLE),
         ("body", limitations_text()),
+        ("heading", SCREEN_NOTES_TITLE),
+        ("body", SCREEN_NOTES_TEXT),
         ("heading", RESULTS_TITLE),
         ("mono", attack_results_lines(attack_data) + "\n\n" + speed_results_lines(speed_data)),
         ("note", "These numbers are not typed into the program. If you re-run attack.py or "

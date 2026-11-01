@@ -7,8 +7,12 @@ tests/test_gui_helpers.py, which needs no display."""
 import csv
 import os
 import tempfile
-import tkinter as tk
 import unittest
+
+try:
+    import tkinter as tk
+except ImportError as error:        # some Python installs have no tkinter
+    raise unittest.SkipTest(f"tkinter is not installed: {error}")
 
 import attack
 import cipher
@@ -302,7 +306,7 @@ class TestExperimentsAndFiles(GuiTestCase):
         results = self.app.load_saved_attack_results()
         self.assertIsNotNone(results)
         self.assertEqual([len(self.app.attack_trees[t].get_children()) for t in ("table1", "table2", "table3")],
-                         [6, 6, 5])
+                         [7, 7, 5])
         first = self.app.attack_trees["table1"].item(self.app.attack_trees["table1"].get_children()[0])["values"]
         self.assertEqual(len(first), 7)
 
@@ -319,15 +323,15 @@ class TestExperimentsAndFiles(GuiTestCase):
         self.assertNotEqual(str(self.app.exp_note_label.cget("fg")), gui.RED)    # no error
         self.assertEqual(self.app.exp_note_var.get(), "done (10 trials per row)")
         self.assertEqual([len(self.app.attack_trees[t].get_children()) for t in ("table1", "table2", "table3")],
-                         [6, 6, 5])
+                         [7, 7, 5])
         self.assertEqual(str(self.app.exp_run.cget("state")), "normal")
-        self.assertEqual(float(self.app.exp_bar.cget("value")), 17.0)
+        self.assertEqual(float(self.app.exp_bar.cget("value")), 19.0)
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "attack_results_gui.csv")
             self.assertEqual(self.app.save_attack_csv(path), path)
             with open(path, newline="") as fh:
                 rows = list(csv.DictReader(fh))
-        self.assertEqual(len(rows), 17)
+        self.assertEqual(len(rows), 19)
         self.assertEqual({r["trials"] for r in rows}, {"10"})
 
     def test_cancel_stops_the_experiments(self):
@@ -406,7 +410,7 @@ class TestSelfTestAndHelp(GuiTestCase):
     def test_tabs(self):
         self.assertEqual(self.app.notebook.index("end"), 4)
         titles = [self.app.notebook.tab(i, "text").strip() for i in range(4)]
-        self.assertEqual(titles, ["Lock / Unlock", "Break It", "Speed Test", "How It Works"])
+        self.assertIn(titles, (gui.TAB_TITLES_LONG, gui.TAB_TITLES_SHORT))      # long names, or short if they do not fit
         self.assertEqual(self.root.title(), "CT-486 NIS CCP - Vigenere + Rail Fence")
         self.assertEqual(self.root.minsize(), (950, 680))
 
