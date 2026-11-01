@@ -1,4 +1,6 @@
 import inspect
+import random
+import string
 import unittest
 
 import attack
@@ -58,6 +60,45 @@ class TestKnownPlaintextAttack(unittest.TestCase):
                 self.assertIn("crib too short", found["error"])
                 self.assertIsNone(found["plaintext"])
                 self.assertEqual(found["guesses"], 0)
+
+
+class TestKnownPlaintextNonEnglish(unittest.TestCase):
+    """Phase 3: the crib must be used as evidence, not just English scoring."""
+
+    def test_random_letter_plaintext_is_recovered_exactly(self):
+        rng = random.Random(486)
+        for trial in range(20):
+            plaintext = "".join(rng.choices(string.ascii_uppercase, k=500))
+            key = "".join(rng.choices(string.ascii_uppercase, k=rng.randint(10, 20)))
+            rails = rng.randint(2, 10)
+            _, ciphertext = cipher.custom_encrypt(plaintext, key, rails)
+            with self.subTest(trial=trial, key_length=len(key), rails=rails):
+                found = attack.known_plaintext_attack(ciphertext, plaintext[:30])
+                self.assertTrue(found["ok"])
+                self.assertEqual(found["plaintext"], plaintext)
+                self.assertEqual(found["rails"], rails)
+
+    def test_random_letters_key_12_crib_20_is_recovered_exactly(self):
+        # Crib 20 vs key 12 gives 8 periodicity checks (>= MIN_CHECKS).
+        rng = random.Random(486)
+        for trial in range(20):
+            plaintext = "".join(rng.choices(string.ascii_uppercase, k=500))
+            key = "".join(rng.choices(string.ascii_uppercase, k=12))
+            rails = rng.randint(2, 10)
+            _, ciphertext = cipher.custom_encrypt(plaintext, key, rails)
+            with self.subTest(trial=trial, rails=rails):
+                found = attack.known_plaintext_attack(ciphertext, plaintext[:20])
+                self.assertTrue(found["ok"])
+                self.assertEqual(found["plaintext"], plaintext)
+                self.assertEqual(found["rails"], rails)
+                self.assertEqual(found["key"], key)
+
+    def test_failure_result_has_same_shape_as_success(self):
+        plaintext, ciphertext = make_case(0, "KXVQMZPLTWNBRHDYAE", 4, 500)
+        good = attack.known_plaintext_attack(ciphertext, plaintext[:30])
+        bad = attack.known_plaintext_attack(ciphertext, plaintext[:9])
+        self.assertEqual(set(bad), set(good))
+        self.assertFalse(bad["ok"])
 
 
 class TestThreatModel(unittest.TestCase):

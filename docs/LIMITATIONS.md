@@ -105,7 +105,7 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Status:** OPEN
 
 ## L16. The known-plaintext attack needs a crib at least as long as the key
-- **Limitation:** The attack derives only M key-stream letters from an M-letter crib, so it can only build keys up to length M. At N = 500 it succeeded 12 % of the time with M = 10, 56 % with M = 15 and 100 % with M >= 20 (keys were 10..20 letters). It also assumes the crib is the very start of the message (positions 0..M-1) and is already cleaned to A-Z; a crib found elsewhere in the text, or one containing spaces, is not handled.
+- **Limitation:** The attack derives only M key-stream letters from an M-letter crib, so it can only build keys up to length M. At N = 500 it succeeded 12 % of the time with M = 10, 56 % with M = 15, 100 % with M = 20 and 100 % with M >= 30 (keys were 10..20 letters, English plaintext; current numbers. An intermediate Phase 3 version briefly gave 47 % and 95 % at M = 15 and 20, see L26). It also assumes the crib is the very start of the message (positions 0..M-1) and is already cleaned to A-Z; a crib found elsewhere in the text, or one containing spaces, is not handled.
 - **Viva defence:** If the crib is shorter than the key, part of the key stream is simply unknown, so no method could recover it from the crib alone. The start-of-message assumption matches the specification for this step.
 - **Planned fix:** Extend to a crib at a known or unknown position (try every offset) if time allows.
 - **Status:** OPEN
@@ -141,7 +141,7 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Status:** OPEN
 
 ## L22. Attacks assume clean A-Z ciphertext and ideal conditions
-- **Limitation:** The attacks reject ciphertext that is empty or contains anything other than uppercase A-Z, and assume the attacker knows the exact algorithm, the ranges, and that the plaintext is ordinary English. Cipher errors, missing letters, or a different language would defeat them.
+- **Limitation:** The attacks reject ciphertext that is empty or contains anything other than uppercase A-Z, and assume the attacker knows the exact algorithm, the ranges, and (for the frequency attack) that the plaintext is ordinary English. Since Phase 3 the known-plaintext attack no longer needs English when the crib is at least 3 letters longer than the key (see L25); with a shorter crib it still falls back to English scoring (L28). The frequency attack always needs English and is expected to fail on random-letter plaintext. Cipher errors, missing letters, or a different language would defeat them.
 - **Viva defence:** This is the stated threat model (the attacker knows the algorithm, not the key). Assuming a strong, well-informed attacker is the standard way to judge a cipher.
 - **Planned fix:** None planned; document only.
 - **Status:** ACCEPTED
@@ -157,3 +157,33 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Viva defence:** Found by a test written before the code was run, fixed in the code (the test was not changed).
 - **Planned fix:** Done.
 - **Status:** SOLVED in Step 2
+
+---
+
+# Added in Phase 3 (attack hardening and comments)
+
+## L25. The known-plaintext attack depended on English scoring
+- **Limitation:** In Step 2 the winning (rails, key length) was chosen by English chi-squared of the whole decrypted text, so the crib was barely used as evidence. On non-English plaintext it failed: in a 20-trial test with 500 uniformly random letters (key 10..20, crib 30) the Step 2 attack recovered the plaintext 0 times out of 20. This was not recorded as its own entry in Step 2 (only touched on in L22); it is recorded here.
+- **Viva defence:** Step 2 was built to meet the specified scoring method and was never claimed to work on non-English text; the weakness was found by testing a harder case and then fixed.
+- **Planned fix:** Done. A candidate whose key stream repeats perfectly over at least `MIN_CHECKS` (3) comparisons is "verified" and chosen by smaller key length (English score only as a tie-breaker). English scoring alone is used only when no candidate can be verified (that remaining case is L28).
+- **Evidence:** The same 20-trial random-plaintext test now recovers the exact plaintext and the right rails 20 times out of 20 (test `test_random_letter_plaintext_is_recovered_exactly`); a second test with key length 12 and crib 20 also passes 20 of 20. Table 2 (crib 30) is unchanged at 100 % for every N.
+- **Status:** SOLVED in Phase 3 (for crib length >= key length + 3; shorter cribs: see L28)
+
+## L26. The known-plaintext attack gets WORSE when the crib is barely longer than the key
+- **Limitation:** The periodicity check needs M - L comparisons for key length L. If M = L there are none; the specified rule treats such a candidate as violation rate 1.0 (worst), so it loses to wrong, shorter key lengths whose rate is only about 0.96. The attack then fails for every key with L = M. If M = L + 1 there is a single check, which a wrong candidate can pass by luck (about 1 in 26). If M < L the key cannot be recovered at all (L16). Measured effect in the full run (N = 500, 100 trials): M = 15 fell from 56 % (Step 2) to 47 %, and M = 20 fell from 100 % to 95 %. A separate diagnostic (400 trials) showed the failures were exactly the keys with L = M (for M = 15, 38 of 38 keys of length 15 failed; for M = 20, 30 of 30 keys of length 20 failed) plus a few single-check cases (1 of 38 and 2 of 37). The old English-only scoring happened to rescue the L = M case. M = 10 is unchanged at 12 %: every candidate has length 10, so there are never any checks.
+- **Viva defence:** With no repeat to check, the crib cannot prove anything about the key length, so an honest attack must either guess or admit it does not know. The ranking was fixed in advance and deliberately not adjusted after seeing the results. The trade is clear: the attack now works on any plaintext when the crib is longer than the key, and is slightly worse than before when the crib length equals the key length.
+- **Planned fix:** Done in Phase 3 (second change). A candidate now counts as "verified" only if it has zero violations AND at least `MIN_CHECKS = 3` checks (a random stream passes 3 checks by chance with probability 1/26^3, giving about 0.008 expected false positives over the 144 candidates; the constant was fixed before the run). If any candidate is verified, the smallest-L verified one wins; if none is, the attack falls back to the English chi-squared score over all candidates, as in Step 2. A zero-check candidate is therefore no longer ranked as "worst".
+- **Result:** Table 3 (N = 500, 100 trials, seed 486) went from 47 % to 56 % at M = 15 and from 95 % to 100 % at M = 20, i.e. back to the Step 2 numbers, while keeping the Phase 3 gain on non-English plaintext. Nothing got worse; Table 2 is unchanged at 100 %.
+- **Status:** SOLVED in Phase 3 (for crib length >= key length + 3). The remaining cases, M <= key length + 2, are tracked in L28.
+
+## L27. Comments can drift away from the code
+- **Limitation:** Phase 3 added many explanatory comments and worked examples to `cipher.py` and `attack.py`. Comments are not executed, so a later code change could leave them out of date without any test failing.
+- **Viva defence:** Logic was proved unchanged by comparing the syntax tree (comments and docstrings removed) before and after commenting, and the numeric examples in the comments (e.g. HELLO + CAT -> JEENO, ABCDEFGHIJ on 3 rails -> AEIBDFHJCG) were checked against the real functions.
+- **Planned fix:** Re-check the examples whenever the code changes; optionally turn them into doctests.
+- **Status:** OPEN
+
+## L28. A crib that is too short to verify falls back to English scoring
+- **Limitation:** The known-plaintext attack only trusts a candidate that passes at least `MIN_CHECKS` = 3 periodicity checks, which needs M >= L + 3 (L = true key length). When M <= L + 2 the crib gives fewer than 3 checks, nothing can be verified, and the attack falls back to choosing the most English-looking candidate. That fallback works on English text but fails on non-English plaintext such as random letters. Measured separately (outside the test suite, 1,100 trials per row, N = 500, random-letter plaintext, keys 10..20, seed 486): crib 30 recovers 100 %; crib 20 recovers about 74 % (73.8 %), failing only for keys of length 18 to 20; crib 15 recovers about 29 %, succeeding only for keys of length 10 to 12. When M < L the key cannot be recovered at all, whatever the plaintext (L16). Also, a wrong candidate could pass three checks by chance, about 0.8 % of attacks (the figure used to choose `MIN_CHECKS`); this was not observed in testing.
+- **Viva defence:** Three clean repeats are the least evidence we accept as proof, and below that the attack honestly reverts to the best guess it has (English statistics) rather than claiming a proof it does not have. A short crib simply contains too little information to pin down a long key.
+- **Planned fix:** Return the top few candidates instead of one when nothing is verified; or require a longer crib and report "insufficient crib" instead of guessing. Not done.
+- **Status:** OPEN

@@ -9,6 +9,7 @@ Python 3, standard library only (no pip installs).
 |------|-------|--------|
 | 1 | Core cipher (`cipher.py`), unit tests, repo hygiene, limitations log | Done |
 | 2 | Attacks (`attack.py`): frequency attack, known-plaintext attack, experiments | Done |
+| 3 | Attack hardening (known-plaintext attack no longer relies on English scoring) and beginner-friendly comments in `cipher.py` and `attack.py` | Done |
 
 ### Step 1 — what exists
 
@@ -27,9 +28,15 @@ Python 3, standard library only (no pip installs).
 - `attack.py`
   - `ENGLISH_FREQ` (asserted to sum to 1.0), `index_of_coincidence`
   - `frequency_attack(ciphertext)` — ciphertext only. For each rails value 2..10 it undoes Rail Fence, picks the key length 10..25 by average Index of Coincidence (smallest length wins near-ties), solves each column by chi-squared, and keeps the rails value whose decrypted text scores best.
-  - `known_plaintext_attack(ciphertext, crib)` — the crib is the first M plaintext letters. For each rails value and key length 10..min(M, 25) it derives the key from the crib, decrypts, and scores by chi-squared. A crib shorter than 10 returns a failure result instead of raising.
+  - `known_plaintext_attack(ciphertext, crib)` — the crib is the first M plaintext letters. For each rails value it derives the key stream from the crib; for each key length 10..min(M, 25) it checks whether the stream repeats with that period. A candidate that repeats perfectly over at least 3 checks (`MIN_CHECKS`) is "verified" and the smallest such key length wins; if nothing can be verified (crib too short) it falls back to English scoring (Phase 3). A crib shorter than 10 returns a failure result instead of raising.
   - `run_experiments(trials, seed)` and a CLI that prints three tables and writes `results/attack_results.csv`
 - `tests/test_attack.py` — exact recovery on fixed cases, short-crib handling, a signature test for the threat model, frequency-table check
+
+### Phase 3 — what changed
+
+- **Attack hardening:** `known_plaintext_attack` now treats the crib as evidence. The key stream derived from the crib must repeat with the key length, so a wrong rails value or key length shows up as a failed repeat. A candidate that repeats perfectly over at least 3 checks is trusted; only when no candidate can be trusted does the attack fall back to English scoring. Works on any plaintext, not only English, when the crib is at least 3 letters longer than the key. Same function signature, same result shape, same threat model.
+- **Comments:** `cipher.py` and `attack.py` have banner comments for every part and plain-English explanations of the mod-26 arithmetic, the repeating key, the Rail Fence zigzag order, the Index of Coincidence, chi-squared and the periodicity ranking. No logic was changed (checked by comparing the code's syntax tree before and after).
+- New tests: random-letter plaintext recovered exactly (20 trials, crib 30), random letters with a 12-letter key and a crib of 20 (20 trials), failure result has the same shape as a success.
 
 Not yet built: GUI, benchmarks.
 
@@ -48,7 +55,7 @@ Text lengths are letters. Keys are random, length 10..20; rails random, 2..10.
 | 500 | 84 % | 100 % |
 | 1000 and up | 100 % | 100 % |
 
-Known-plaintext attack against crib size (N = 500): crib 10 gives 12 %, 15 gives 56 %, 20 and above give 100 %. The attack cannot work when the crib is shorter than the key. Full tables, including accuracy, rails-correct, time and guesses, are printed by `python attack.py` and saved in `results/attack_results.csv`. Timings depend on the machine. These numbers come from the author's own corpus; see `docs/LIMITATIONS.md` for what that does and does not show.
+Known-plaintext attack against crib size (N = 500, English plaintext): crib 10 gives 12 %, 15 gives 56 %, 20 and above give 100 %. The attack cannot work when the crib is shorter than the key. It now also works on plaintext that is not English as long as the crib is at least 3 letters longer than the key: with random-letter plaintext and a crib of 30, 20 of 20 test messages are recovered exactly (it was 0 of 20 before Phase 3). With a shorter crib it falls back to English scoring; in a separate check on random-letter plaintext, a crib of 20 recovered about 74 % and a crib of 15 about 29 % (see L28 in `docs/LIMITATIONS.md`). Full tables, including accuracy, rails-correct, time and guesses, are printed by `python attack.py` and saved in `results/attack_results.csv`. Timings depend on the machine. These numbers come from the author's own corpus; see `docs/LIMITATIONS.md` for what that does and does not show.
 
 ## Usage
 
