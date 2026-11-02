@@ -4,7 +4,6 @@ If this computer has no display, Tk cannot start; then these tests are
 SKIPPED, not failed. The pure helper functions in gui.py are tested in
 tests/test_gui_helpers.py, which needs no display."""
 
-import csv
 import os
 import tempfile
 import unittest
@@ -15,6 +14,7 @@ except ImportError as error:        # some Python installs have no tkinter
     raise unittest.SkipTest(f"tkinter is not installed: {error}")
 
 import attack
+import benchmark
 import cipher
 import gui
 
@@ -22,6 +22,13 @@ PLAIN = "DEFENDTHEEASTWALLOFTHECASTLE"
 KEY = "CRYPTOGRAPHY"
 STAGE1 = "FVDTGRZYETHQVNYAECLKHTJYUKJT"
 FINAL = "FEEUVYTACYKDZHYLJJTRQNKTTGVH"
+
+
+def all_widgets(widget):
+    """Every widget below `widget`, at any depth."""
+    for child in widget.winfo_children():
+        yield child
+        yield from all_widgets(child)
 
 
 class GuiTestCase(unittest.TestCase):
@@ -43,10 +50,13 @@ class GuiTestCase(unittest.TestCase):
 
     def setUp(self):
         # Start every test from a clean screen.
+        self.app.wait_until_idle(timeout=30)
+        self.app.notebook.select(gui.TAB_LOCK)
         self.app.clear_all()
         self.app.key_var.set("")
         self.app.rails_var.set("4")
         self.app.inline_var.set("")
+        self.app._status_memory = {tab: (m, "info") for tab, m in gui.READY_MESSAGES.items()}
 
     def fill(self, message, key, rails):
         self.app.set_message(message)
@@ -77,14 +87,6 @@ class TestLockUnlock(GuiTestCase):
         self.assertEqual(out["final"], PLAIN)                        # after undoing Stage 1
         self.assertEqual(out["middle"], STAGE1)                      # after undoing Stage 2 only
         self.assertIn("yes", self.app.check_label.cget("text"))
-
-    def test_lock_then_move_then_unlock_round_trip(self):
-        self.fill("Meet me at the old stone bridge at dawn.", "LEMONSQUEEZE", 6)
-        locked = self.app.do_encrypt()
-        self.assertTrue(self.app.move_output_to_input())
-        self.assertEqual(self.app.get_message(), locked)
-        self.assertEqual(self.app.get_outputs()["final"], "")        # outputs were cleared
-        self.assertEqual(self.app.do_decrypt(), "MEETMEATTHEOLDSTONEBRIDGEATDAWN")
 
     def test_removed_characters_are_reported(self):
         self.fill("Hello, World 123", KEY, 3)
@@ -166,13 +168,6 @@ class TestLockUnlock(GuiTestCase):
         self.app._on_key_enter()
         self.assertEqual(self.app.get_outputs()["final"], FINAL)
 
-    def test_copy_output(self):
-        self.assertFalse(self.app.copy_output())                     # nothing to copy yet
-        self.fill(PLAIN, KEY, 5)
-        self.app.do_encrypt()
-        self.assertTrue(self.app.copy_output())
-        self.assertEqual(self.root.clipboard_get(), FINAL)
-
     def test_show_working_window(self):
         self.assertIsNone(self.app.show_working())                   # nothing locked yet
         self.assertIn("Lock", self.app.inline_text())
@@ -184,6 +179,22 @@ class TestLockUnlock(GuiTestCase):
             self.assertEqual(win.title(), "Show working")
         finally:
             win.destroy()
+
+
+class TestLockUnlockRoundTrip(GuiTestCase):
+    def test_lock_then_unlock_the_ciphertext_gives_the_original(self):
+        # (There is no "Move output to input" button any more: the ciphertext is pasted into the message box.)
+        self.fill("Meet me at the old stone bridge at dawn.", "LEMONSQUEEZE", 6)
+        locked = self.app.do_encrypt()
+        self.app.set_message(locked)
+        self.assertEqual(self.app.do_decrypt(), "MEETMEATTHEOLDSTONEBRIDGEATDAWN")
+
+    def test_the_output_is_not_kept_after_clear(self):
+        self.fill(PLAIN, KEY, 5)
+        self.app.do_encrypt()
+        self.app.clear_all()
+        self.assertEqual(self.app.get_outputs(), {"cleaned": "", "middle": "", "final": ""})
+        self.assertIsNone(self.app._last_op)                         # Show Working has nothing left either
 
 
 class TestWorkingDocument(GuiTestCase):
@@ -221,23 +232,17 @@ class TestWorkingDocument(GuiTestCase):
         self.assertNotEqual(error, "")
 
 
-class TestBreakItTab(GuiTestCase):
+class TestAttackTab(GuiTestCase):
     def setUp(self):
         super().setUp()
-        # Every test starts from the window's default "Break It" settings, so
-        # one test cannot leak its choices into the next.
-        self.app.source_var.set("test")
+        # Every test starts from the tab's default settings, so one test cannot leak its choices into the next.
         self.app.attack_var.set("freq")
         self.app.n_var.set("500")
         self.app.crib_size_var.set("30")
-        self.app.paste_text.delete("1.0", "end")
-        self.app.crib_entry_var.set("")
         self.app.attack_inline_var.set("")
         self.app._clear_attack_result()
 
     def test_frequency_attack_on_a_test_message(self):
-        self.app.source_var.set("test")
-        self.app.attack_var.set("freq")
         self.app.n_var.set("2500")
         self.assertTrue(self.app.run_attack())
         self.assertTrue(self.app.wait_until_idle(60))
@@ -253,9 +258,7 @@ class TestBreakItTab(GuiTestCase):
         self.assertTrue(self.app._truth["plaintext"].startswith(recovered))
 
     def test_known_plaintext_attack_on_a_test_message(self):
-        self.app.source_var.set("test")
         self.app.attack_var.set("kpa")
-        self.app.n_var.set("500")
         self.app.crib_size_var.set("30")
         self.app.run_attack()
         self.assertTrue(self.app.wait_until_idle(60))
@@ -263,156 +266,259 @@ class TestBreakItTab(GuiTestCase):
         self.assertEqual(self.app.result_vars["rails"].get(), str(self.app._truth["rails"]))
         self.assertEqual(self.app.result_vars["key"].get(), self.app._truth["key"])
 
-    def test_attack_on_pasted_ciphertext(self):
-        plain = (gui.attack.load_corpus())[:2500]
-        _, ciphertext = cipher.custom_encrypt(plain, "KXVQMZPLTWNBRHDYAE", 4)
-        self.app.source_var.set("paste")
-        self.app.attack_var.set("kpa")
-        self.app.paste_text.delete("1.0", "end")
-        self.app.paste_text.insert("1.0", ciphertext[:50] + " \n" + ciphertext[50:])   # with whitespace
-        self.app.crib_entry_var.set(plain[:30].lower())                                  # crib in lowercase
-        self.app.run_attack()
+    def test_a_50_letter_test_message_can_be_attacked(self):
+        self.assertEqual(list(self.app.n_combo.cget("values")), [str(n) for n in attack.TEXT_LENGTHS])
+        self.assertIn("50", self.app.n_combo.cget("values"))
+        self.app.n_var.set("50")
+        self.assertTrue(self.app.run_attack())
         self.assertTrue(self.app.wait_until_idle(60))
-        self.assertEqual(self.app.result_vars["key"].get(), "KXVQMZPLTWNBRHDYAE")
-        self.assertEqual(self.app.result_vars["rails"].get(), "4")
-        self.assertEqual(self.app.correct_var.get(), "")             # pasted: the truth is unknown
-        self.assertEqual(str(self.app.reveal_button.cget("state")), "disabled")
+        self.assertEqual(self.app.attack_inline_var.get(), "")
+        self.assertTrue(self.app.result_vars["time"].get().endswith("ms"))
 
-    def test_pasted_attack_needs_input_and_a_long_enough_crib(self):
-        self.app.source_var.set("paste")
+    def test_the_crib_size_is_only_available_for_the_known_plaintext_attack(self):
         self.app.attack_var.set("freq")
-        self.app.paste_text.delete("1.0", "end")
-        self.assertFalse(self.app.run_attack())
-        self.assertIn("Paste a ciphertext", self.app.attack_inline_var.get())
-        self.app.paste_text.insert("1.0", "ABCDEFGHIJKLMNOPQRSTUVWXYZ" * 4)
+        self.assertEqual(str(self.app.crib_spin.cget("state")), "disabled")
         self.app.attack_var.set("kpa")
-        self.assertFalse(self.app.run_attack())
-        self.assertIn("needs a crib", self.app.attack_inline_var.get())
-        self.app.crib_entry_var.set("SHORT")                          # fewer than 10 letters
-        self.app.run_attack()
-        self.assertTrue(self.app.wait_until_idle(30))
-        self.assertIn("rib too short", self.app.attack_inline_var.get())    # the attack's own plain message
-        self.assertEqual(self.app.result_vars["key"].get(), "-")
+        self.assertEqual(str(self.app.crib_spin.cget("state")), "normal")
 
-    def test_bad_crib_size_is_rejected_inline(self):
-        self.app.source_var.set("test")
+    def test_bad_crib_size_is_rejected_inline_for_the_known_plaintext_attack(self):
+        self.app.attack_var.set("kpa")
         self.app.crib_size_var.set("5")
         self.assertFalse(self.app.run_attack())
         self.assertIn("between 10 and 40", self.app.attack_inline_var.get())
+        self.app.crib_size_var.set("abc")
+        self.assertFalse(self.app.run_attack())
+        self.assertIn("whole numbers", self.app.attack_inline_var.get())
+
+    def test_the_crib_size_is_ignored_by_the_frequency_attack(self):
+        self.app.crib_size_var.set("5")                              # would be rejected for the other attack
+        self.assertTrue(self.app.run_attack())
+        self.assertTrue(self.app.wait_until_idle(60))
+        self.assertEqual(self.app.attack_inline_var.get(), "")
+
+    def test_the_window_stays_responsive_while_the_attack_runs(self):
+        self.app.n_var.set("5000")
+        self.assertTrue(self.app.run_attack())
+        self.assertTrue(self.app.is_busy())
+        self.assertFalse(self.app.run_attack())                      # a second press is ignored while busy
+        self.assertEqual(str(self.app.attack_button.cget("state")), "disabled")
+        self.root.update()                                           # the window can still handle events
+        self.assertTrue(self.app.wait_until_idle(60))
+        self.assertEqual(str(self.app.attack_button.cget("state")), "normal")
 
 
-class TestExperimentsAndFiles(GuiTestCase):
-    def test_load_saved_full_results_is_instant(self):
-        results = self.app.load_saved_attack_results()
-        self.assertIsNotNone(results)
-        self.assertEqual([len(self.app.attack_trees[t].get_children()) for t in ("table1", "table2", "table3")],
-                         [7, 7, 5])
-        first = self.app.attack_trees["table1"].item(self.app.attack_trees["table1"].get_children()[0])["values"]
-        self.assertEqual(len(first), 7)
+class TestSavedAttackTable(GuiTestCase):
+    def test_the_table_shows_the_real_columns_of_the_csv(self):
+        data = self.app.load_saved_attack_results()
+        self.assertIsNotNone(data)
+        summary = gui.attack_summary(gui.read_attack_csv())
+        rows = [list(self.app.attack_table.item(i)["values"]) for i in self.app.attack_table.get_children()]
+        self.assertEqual(len(rows), len(attack.TEXT_LENGTHS))
+        for shown, expected in zip(rows, summary["rows"]):
+            self.assertEqual([str(v) for v in shown], expected)
+        headings = [self.app.attack_table.heading(c)["text"] for c in self.app.attack_table["columns"]]
+        self.assertEqual(headings[0], "Length N")
+        self.assertIn("Frequency", headings[1])
+        self.assertIn("time", headings[2])
+        self.assertIn(f"crib {summary['crib']}", headings[3])
+        self.assertEqual(len(headings), 5)
+        self.assertIn(f"{summary['trials']} trials per row", self.app.attack_table_frame.cget("text"))
 
-    def test_missing_saved_results_gives_a_friendly_message(self):
-        self.assertIsNone(self.app.load_saved_attack_results(path=os.path.join(tempfile.gettempdir(), "nope_x.csv")))
-        self.assertIn("was not found", self.app.exp_note_var.get())
-        self.assertEqual(str(self.app.exp_note_label.cget("fg")), gui.RED)       # errors are red
+    def test_opening_the_tab_loads_the_table(self):
+        self.app.attack_table.delete(*self.app.attack_table.get_children())
+        self.app.notebook.select(gui.TAB_ATTACK)
+        self.app._on_tab_changed()
+        self.assertEqual(len(self.app.attack_table.get_children()), len(attack.TEXT_LENGTHS))
 
-    def test_quick_experiments_run_finish_and_can_be_saved(self):
-        self.app.exp_mode_var.set("quick")
-        self.assertTrue(self.app.run_experiments())
-        self.assertFalse(self.app.run_experiments())                 # a second start is ignored while busy
-        self.assertTrue(self.app.wait_until_idle(180))
-        self.assertNotEqual(str(self.app.exp_note_label.cget("fg")), gui.RED)    # no error
-        self.assertEqual(self.app.exp_note_var.get(), "done (10 trials per row)")
-        self.assertEqual([len(self.app.attack_trees[t].get_children()) for t in ("table1", "table2", "table3")],
-                         [7, 7, 5])
-        self.assertEqual(str(self.app.exp_run.cget("state")), "normal")
-        self.assertEqual(float(self.app.exp_bar.cget("value")), 19.0)
+    def test_a_missing_csv_shows_the_friendly_line_and_does_not_crash(self):
+        self.app.load_saved_attack_results()                         # something on screen first
+        missing = os.path.join(tempfile.gettempdir(), "nope_attack_phase7.csv")
+        self.assertIsNone(self.app.load_saved_attack_results(path=missing))
+        self.assertEqual(self.app.attack_note_var.get(), "Run python attack.py to create results/attack_results.csv")
+        self.assertEqual(str(self.app.attack_note_label.cget("fg")), gui.RED)
+        self.assertEqual(self.app.attack_table.get_children(), ())   # the old rows are gone, not left stale
+
+    def test_a_damaged_csv_shows_a_message_and_does_not_crash(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = os.path.join(tmp, "attack_results_gui.csv")
-            self.assertEqual(self.app.save_attack_csv(path), path)
-            with open(path, newline="") as fh:
-                rows = list(csv.DictReader(fh))
-        self.assertEqual(len(rows), 19)
-        self.assertEqual({r["trials"] for r in rows}, {"10"})
+            bad = os.path.join(tmp, "bad.csv")
+            with open(bad, "w", newline="") as fh:
+                fh.write("table,x\ntable1,1\n")
+            self.assertIsNone(self.app.load_saved_attack_results(path=bad))
+        self.assertIn("not in the expected format", self.app.attack_note_var.get())
 
-    def test_cancel_stops_the_experiments(self):
-        self.app.exp_mode_var.set("full")                            # long, so cancel really matters
-        self.assertTrue(self.app.run_experiments())
-        self.assertTrue(self.app.cancel_experiments())
-        self.assertTrue(self.app.wait_until_idle(120))
-        self.assertEqual(self.app.exp_note_var.get(), "cancelled")
-        self.assertEqual(str(self.app.exp_run.cget("state")), "normal")
-        self.assertEqual(str(self.app.exp_cancel.cget("state")), "disabled")
-        self.assertIn("Cancelled", self.app.status_var.get())
-
-    def test_saving_never_overwrites_the_protected_result_files(self):
-        self.app.load_saved_attack_results()
+    def test_the_gui_never_writes_to_the_results_file(self):
         with open(attack.RESULTS_PATH, "rb") as fh:
             before = fh.read()
-        for protected in (attack.RESULTS_PATH, attack.RESULTS_PATH_QUICK):
-            self.assertIsNone(self.app.save_attack_csv(protected))
-            self.assertIn("protected", self.app.exp_note_var.get())
-            self.assertEqual(str(self.app.exp_note_label.cget("fg")), gui.RED)
-        # Same file reached by a different spelling of the path is still protected.
-        sneaky = os.path.join(os.path.dirname(attack.RESULTS_PATH), "..", "results", "attack_results.csv")
-        self.assertIsNone(self.app.save_attack_csv(sneaky))
+        self.app.load_saved_attack_results()
+        self.app.notebook.select(gui.TAB_ATTACK)
+        self.app._on_tab_changed()
         with open(attack.RESULTS_PATH, "rb") as fh:
             self.assertEqual(fh.read(), before)
 
-    def test_save_without_results_explains_why(self):
-        self.app._attack_results = None
-        self.assertIsNone(self.app.save_attack_csv())               # no dialog is opened
-        self.assertIn("no results to save", self.app.exp_note_var.get())
 
+class TestEfficiencyTab(GuiTestCase):
+    def setUp(self):
+        super().setUp()
+        self.app._speed_results = None
 
-class TestSpeedTab(GuiTestCase):
-    def test_load_saved_speed_results(self):
-        data = self.app.load_saved_speed_results()
-        self.assertIsNotNone(data)
-        self.assertEqual(len(self.app.speed_tree.get_children()), 6)
-        self.assertGreater(len(self.app.chart_time.find_all()), 10)       # the chart was drawn
+    def test_the_saved_table_loads_when_the_tab_is_opened(self):
+        self.app.notebook.select(gui.TAB_EFFICIENCY)
+        self.app._on_tab_changed()
+        saved = gui.read_benchmark_csv()
+        self.assertEqual(len(self.app.speed_tree.get_children()), len(saved["table_a"]))
+        self.assertGreater(len(self.app.chart_time.find_all()), 10)       # the charts were drawn
         self.assertGreater(len(self.app.chart_per_char.find_all()), 10)
-        verdict = self.app._get_text(self.app.verdict_box)
-        self.assertIn("log-log slope", verdict)
-        self.assertIn("Peak memory", verdict)
-        self.assertIn("N=100000", verdict)                       # every measured size is listed
+        self.assertIn("Saved results", self.app.speed_source_var.get())
+        self.assertEqual(self.app.speed_note_var.get(), gui.SPEED_HINT)
+        self.assertEqual(self.app.speed_note_var.get(), "Median time per message length. Flat custom us/char = O(N).")
 
-    def test_missing_saved_speed_results(self):
-        self.assertIsNone(self.app.load_saved_speed_results(path=os.path.join(tempfile.gettempdir(), "nope_y.csv")))
-        self.assertIn("was not found", self.app.speed_note_var.get())
+    def test_a_missing_csv_shows_a_friendly_red_line(self):
+        missing = os.path.join(tempfile.gettempdir(), "nope_speed_phase7.csv")
+        self.assertIsNone(self.app.load_saved_speed_results(path=missing))
+        self.assertEqual(self.app.speed_note_var.get(), "Run python benchmark.py to create results/benchmark_results.csv")
         self.assertEqual(str(self.app.speed_note_label.cget("fg")), gui.RED)
 
-    def test_quick_speed_test_runs_and_can_be_cancelled(self):
-        self.app.speed_mode_var.set("quick")
+    def test_there_is_only_a_quick_run_no_full_option_and_no_load_button(self):
+        texts = {str(w.cget("text")) for w in all_widgets(self.app.root) if w.winfo_class() in ("TButton", "TRadiobutton")}
+        self.assertIn("Run", texts)
+        self.assertIn("Cancel", texts)
+        for removed in ("Load saved results", "Quick (up to 10,000)", "Full (up to 100,000)"):
+            self.assertNotIn(removed, texts)
+        self.assertEqual(self.app.speed_bar.cget("maximum"), benchmark.count_cells(benchmark.QUICK_SETTINGS))
+
+    def test_a_quick_run_can_be_cancelled(self):
         self.assertTrue(self.app.run_speed_test())
+        self.assertFalse(self.app.run_speed_test())                  # a second start is ignored while busy
         self.assertTrue(self.app.cancel_speed_test())
         self.assertTrue(self.app.wait_until_idle(120))
-        self.assertEqual(self.app.speed_note_var.get(), "cancelled")
+        self.assertEqual(self.app.speed_note_var.get(), gui.SPEED_HINT)
         self.assertEqual(str(self.app.speed_run.cget("state")), "normal")
+        self.assertEqual(str(self.app.speed_cancel.cget("state")), "disabled")
+        self.assertIn("Cancelled", self.app.status_var.get())
+
+    def test_a_quick_run_finishes_and_replaces_the_table(self):
+        self.app.load_saved_speed_results()
+        self.assertTrue(self.app.run_speed_test())
+        self.assertTrue(self.app.wait_until_idle(180))
+        self.assertIn("Quick run", self.app.speed_source_var.get())
+        sizes = [int(self.app.speed_tree.item(i)["values"][0]) for i in self.app.speed_tree.get_children()]
+        self.assertEqual(sizes, benchmark.QUICK_SETTINGS["sizes"])   # a quick run stops at the quick sizes
+        self.assertLessEqual(max(sizes), 10000)
+        self.assertEqual(float(self.app.speed_bar.cget("value")), float(self.app.speed_bar.cget("maximum")))
+        # Opening the tab again must not wipe the run that was just made.
+        self.app.notebook.select(gui.TAB_EFFICIENCY)
+        self.app._on_tab_changed()
+        self.assertIn("Quick run", self.app.speed_source_var.get())
 
 
-class TestSelfTestAndHelp(GuiTestCase):
-    def test_self_test_button_logic(self):
-        checks, ms = self.app.run_self_test(show_window=False)
-        self.assertTrue(all(passed for _, passed, _ in checks))
-        self.assertGreater(ms, 0)
-        self.assertIn("PASS", self.app.selftest_label.cget("text"))
-        self.assertEqual(str(self.app.selftest_label.cget("fg")), gui.GREEN)
-
-    def test_how_it_works_page_reads_numbers_from_the_csv_files(self):
-        self.app.refresh_help()
-        content = self.app.help_content()
-        self.assertIn("Stage 1 - Vigenere", content)
-        self.assertIn("AEIBDFHJCG", content)
-        self.assertIn("JEENO", content)
-        self.assertIn("100 trials per row", content)                  # read from attack_results.csv
-        self.assertIn("log-log slope", content)                       # read from benchmark_results.csv
-
-    def test_tabs(self):
+class TestFourTabsAndDesign(GuiTestCase):
+    def test_four_tabs_with_the_right_titles(self):
         self.assertEqual(self.app.notebook.index("end"), 4)
-        titles = [self.app.notebook.tab(i, "text").strip() for i in range(4)]
+        titles = [self.app.notebook.tab(i, "text") for i in range(4)]
         self.assertIn(titles, (gui.TAB_TITLES_LONG, gui.TAB_TITLES_SHORT))      # long names, or short if they do not fit
+        for title, words in zip(titles, (("Req 2", "Encrypt", "Decrypt"), ("Req 3", "Attack"),
+                                         ("Req 4", "Efficiency"), ("Req 1", "Design"))):
+            for word in words:
+                self.assertIn(word, title)
         self.assertEqual(self.root.title(), "CT-486 NIS CCP - Vigenere + Rail Fence")
         self.assertEqual(self.root.minsize(), (950, 680))
+
+    def test_the_long_titles_are_the_ones_asked_for(self):
+        self.assertEqual(gui.TAB_TITLES_LONG, ["Req 2 \u00b7 Encrypt & Decrypt", "Req 3 \u00b7 Deliverable 2 \u00b7 Attack",
+                                               "Req 4 \u00b7 Efficiency", "Req 1 \u00b7 Deliverable 1 \u00b7 Design"])
+
+    def test_long_names_are_used_only_when_they_fit(self):
+        from unittest import mock
+        from tkinter import font as tkfont
+        with mock.patch.object(tkfont.Font, "measure", return_value=40):
+            self.assertEqual(self.app._choose_tab_titles(), gui.TAB_TITLES_LONG)
+        with mock.patch.object(tkfont.Font, "measure", return_value=400):
+            self.assertEqual(self.app._choose_tab_titles(), gui.TAB_TITLES_SHORT)
+
+    def test_the_removed_features_are_really_gone(self):
+        for name in ("start_tour", "tour_next", "tour_back", "tour_exit", "_build_tour_banner", "run_self_test",
+                     "move_output_to_input", "copy_output", "run_experiments", "cancel_experiments",
+                     "save_attack_csv", "attack_sub", "start_button", "selftest_label", "weak_label", "paste_text"):
+            self.assertFalse(hasattr(self.app, name), name)
+        for name in ("run_self_test_checks", "weak_key_note", "experiments_banner", "efficiency_banner", "is_protected"):
+            self.assertFalse(hasattr(gui, name), name)
+        shown = {str(w.cget("text")) for w in all_widgets(self.app.root) if w.winfo_class() in ("TButton", "TRadiobutton")}
+        for removed in ("START HERE", "Run Self-Test", "Move output to input", "Copy output", "Save as CSV...",
+                        "Load saved full results", "Paste my own ciphertext"):
+            self.assertNotIn(removed, shown)
+        self.assertEqual([w for w in all_widgets(self.app.root) if w.winfo_class() == "TNotebook"], [self.app.notebook])
+
+    def test_each_tab_has_its_own_short_ready_message(self):
+        messages = []
+        for tab in range(4):
+            self.app.notebook.select(tab)
+            self.app._on_tab_changed()
+            messages.append(self.app.status_var.get())
+        self.assertEqual(messages[0], gui.READY_MESSAGES[gui.TAB_LOCK])
+        self.assertEqual(messages[3], gui.READY_MESSAGES[gui.TAB_DESIGN])
+        self.assertEqual(len(set(messages)), 4)
+        self.assertTrue(all(m.startswith("Ready.") and m.count(". ") <= 1 for m in messages), messages)
+
+    def test_a_tab_remembers_what_it_last_said(self):
+        self.fill(PLAIN, KEY, 5)
+        self.app.do_encrypt()
+        said = self.app.status_var.get()
+        self.assertTrue(said.startswith("Done in"))
+        self.app.notebook.select(gui.TAB_ATTACK)
+        self.app._on_tab_changed()
+        self.assertEqual(self.app.status_var.get(), gui.READY_MESSAGES[gui.TAB_ATTACK])
+        self.app.notebook.select(gui.TAB_LOCK)
+        self.app._on_tab_changed()
+        self.assertEqual(self.app.status_var.get(), said)
+
+    def test_the_design_examples_match_cipher_py(self):
+        self.app.notebook.select(gui.TAB_DESIGN)
+        self.app._on_tab_changed()
+        content = self.app.design_content()
+        self.assertIn("HELLO + key CAT = " + cipher.vigenere_encrypt("HELLO", "CAT"), content)
+        self.assertIn("ABCDEFGHIJ on 3 rails = " + cipher.rail_encrypt("ABCDEFGHIJ", 3), content)
+        self.assertIn("JEENO", content)
+        self.assertIn("AEIBDFHJCG", content)
+        self.assertNotIn("WARNING", content)
+
+    def test_the_design_page_shows_a_red_warning_if_an_example_disagrees(self):
+        from unittest import mock
+        with mock.patch.object(cipher, "rail_encrypt", lambda text, rails: text):
+            self.app.refresh_design()
+            self.assertIn("WARNING: the Stage 2 example does not match cipher.py", self.app.design_content())
+            self.assertNotIn("AEIBDFHJCG", self.app.design_content())
+            reds = [w for w in self.app.design_frame.winfo_children() if str(w.cget("fg")) == gui.RED]
+            self.assertEqual(len(reds), 1)
+        self.app.refresh_design()
+        self.assertNotIn("WARNING", self.app.design_content())
+
+    def test_the_design_page_numbers_follow_the_csv_files(self):
+        from unittest import mock
+        attack_data, speed_data = gui.read_attack_csv(), gui.read_benchmark_csv()
+        for row in speed_data["table_a"]:
+            row["ratio"] = 7.0
+        with mock.patch.object(gui, "read_benchmark_csv", lambda path=None: speed_data):
+            self.app.refresh_design()
+        self.assertIn("Custom is about 7.0 times slower than Shift.", self.app.design_content())
+        self.assertIn("works from about", self.app.design_content())
+        self.app.refresh_design()
+
+    def test_the_design_page_with_missing_files_does_not_crash(self):
+        from unittest import mock
+        nowhere = os.path.join(tempfile.gettempdir(), "nope_phase7_design.csv")
+        with mock.patch.object(gui, "read_benchmark_csv", side_effect=FileNotFoundError), \
+                mock.patch.object(gui, "read_attack_csv", side_effect=FileNotFoundError):
+            self.app.refresh_design()
+        content = self.app.design_content()
+        self.assertIn("was not found", content)
+        self.assertNotIn("times slower", content)
+        self.app.refresh_design()
+
+    def test_the_design_page_has_no_scrolling_and_is_short(self):
+        tab = self.app.notebook.nametowidget(self.app.notebook.tabs()[gui.TAB_DESIGN])
+        classes = {w.winfo_class() for w in all_widgets(tab)}
+        self.assertFalse(classes & {"Text", "TScrollbar", "Scrollbar", "Canvas"}, classes)
+        self.assertLessEqual(len(self.app.design_frame.winfo_children()), 12)
 
 
 if __name__ == "__main__":

@@ -48,7 +48,8 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Planned fix:** Add a key-strength warning (repeated pattern, low letter variety) in the GUI step.
 - **Phase 5 note:** NOT done. The Phase 5 specification did not include a key-strength warning, so the GUI accepts `AAAAAAAAAA` like `validate_key` does (the live counter only checks letters and length). The planned fix is still wanted.
 - **Phase 6 fix:** Done as a WARNING ONLY. When the key has fewer than 4 different letters (for example `AAAAAAAAAA` or `ABABABABAB`) the Encrypt & Decrypt tab shows an orange note under the key box: "Weak key: very few different letters. Allowed, but easy to break." Locking still works and `validate_key` is unchanged, so such keys are still accepted (tests check both). The test is only a count of different letters, so a longer repeating pattern with 4 or more different letters (for example `ABCDABCDABCD`) is not flagged: see L43.
-- **Status:** SOLVED in Phase 6 (as a warning only; weak keys are still allowed, by design)
+- **Phase 7 note:** The warning added in Phase 6 was REMOVED again in Phase 7 (the GUI was cut down to a viva demo tool, and the warning flashed while typing, L43). So the GUI is back to accepting `AAAAAAAAAA` silently, exactly like `validate_key`. The test that the cipher still accepts weak keys remains.
+- **Status:** OPEN (the Phase 6 warning was removed in Phase 7; the final report should mention weak keys instead)
 
 ## L7. Deterministic, no IV, no integrity protection
 - **Limitation:** The same plaintext, key and rails always give the same ciphertext. There is no nonce/IV and no authentication, so ciphertext can be modified undetected and equal messages are recognisable.
@@ -243,6 +244,7 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** `python gui.py` needs a graphical desktop and tkinter 8.6. The layout was checked only on Windows, at the minimum window size (950 x 680), at one display scale, by looking at screenshots; other operating systems, scales or fonts (the window asks for Segoe UI and Consolas, which other systems replace with something else) may look different or clip. The automated GUI tests build the window hidden and are skipped, not failed, when no display exists, so on a computer without a display only the window-free tests (`tests/test_explain.py`, `tests/test_gui_helpers.py`) run.
 - **Viva defence:** The GUI contains no calculation of its own: all lock, unlock, attack and benchmark results come from `cipher.py`, `attack.py` and `benchmark.py`, which are tested without a window. Handlers such as `do_encrypt` work without a mouse, which is what the smoke tests call.
 - **Planned fix:** Try the window on one other operating system or display scale and adjust the layout if anything clips.
+- **Phase 7 note:** In Phase 7 the four tabs were checked from screenshots at three window sizes (1920 x 1000 for a full-HD desktop, 1366 x 700 for the usable area of a 1366 x 768 laptop, and the 950 x 680 minimum), again on Windows only. See L47.
 - **Status:** OPEN
 
 ## L35. Show Working covers only the first letters
@@ -255,7 +257,8 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** Experiments and the speed test run in a background thread, so the window stays usable, but Cancel is only noticed when the current table row or measurement finishes. In a full experiment run the longest row (known-plaintext attack, 5,000 letters, 100 trials) takes about 17 seconds, so Cancel can take that long to take effect; the speed test's measurements take about a second each. Lock and Unlock themselves run on the main thread (they are fast: about 0.3 microseconds per letter), so a message of many millions of letters would freeze the window briefly. Closing the window during a run asks the worker to stop at its next checkpoint, and the thread is a daemon so it never keeps the program alive.
 - **Viva defence:** The progress callback was specified to be called after each finished cell, which is also the natural place to stop without leaving half-computed rows. The window says "cancelling - finishing the current row". Messages typed or pasted by hand are far below the size where the delay would matter.
 - **Planned fix:** Add a finer progress callback inside a table row (per trial) so Cancel reacts within a fraction of a second; move Lock / Unlock to a worker thread above a size limit.
-- **Status:** OPEN
+- **Phase 7 note:** Mostly moot now: the GUI no longer runs the 100-trial experiments (they are saved results), so the 17-second Cancel delay is gone. Cancel is still only noticed between measurements of the quick speed test (about a second each).
+- **Status:** OPEN (reduced: only the quick speed test can be cancelled)
 
 ## L37. The speed test inside the window is noisier and is not saved
 - **Limitation:** While the speed test runs, the window's own event loop and the other tabs share the same program, and garbage collection is switched off for the whole program during each measurement, so the numbers can be slightly worse or noisier than from `python benchmark.py`. The window also has no button to save a speed run (only the experiment tables can be saved), so a GUI run is shown but not kept. Machine-dependence of all timings: see L29.
@@ -267,6 +270,7 @@ Status values: `OPEN`, `ACCEPTED` (inherent to the design, will not be fixed), `
 - **Limitation:** The key is shown in plain text in the key field (it is not masked), so someone looking at the screen can read it. It stays in the window's memory until the program ends and cannot be wiped (L10). The Copy output button copies only the output, but anything copied to the clipboard stays there until replaced. The key is never written to a file, printed or logged by the program.
 - **Viva defence:** The project demonstrates a classical cipher, and being able to see the key while locking and unlocking is part of showing how it works; classical ciphers are not secure for real secrets in any case (L4).
 - **Planned fix:** Optionally add a "hide key" tick box (masking with dots) and clear the key field when the window closes.
+- **Phase 7 note:** The Copy output button was removed, so nothing in the GUI puts the output on the clipboard any more; the key is still shown in plain text and held in memory while the window is open.
 - **Status:** ACCEPTED
 
 ## L39. Test messages use a private helper and unseeded randomness
@@ -297,16 +301,54 @@ Tab names changed in Phase 6, so entries written earlier use the old names: Lock
 - **Limitation:** START HERE replaces whatever is in the message, key and rails boxes with the sample (the tour must always show the same lock and unlock), clears the output boxes, and starts a real frequency attack on a new random 500-letter test message, so step 3 shows a different key and rails each time and (roughly one time in ten at 500 letters) the attack may be wrong. The banner for step 3 appears before the attack has finished. Steps 4 and 5 need `results/attack_results.csv` and `results/benchmark_results.csv`; if a file is missing the banner says so and shows no numbers. Exit tour leaves everything as the tour left it; it does not restore what the user had typed. Nothing is written to disk by the tour (tests check this).
 - **Viva defence:** Using the real buttons, not canned output, is the point of the tour; a wrong attack result is itself a useful thing to show and is explained by the Reveal truth button. The key is the public sample key, never a key the user typed.
 - **Planned fix:** Remember and restore the user's own inputs when the tour ends; optionally use a fixed seed for the tour's attack.
-- **Status:** OPEN
+- **Phase 7 fix:** The START HERE tour was removed entirely, so there is nothing left that overwrites the user's inputs or starts a random attack by itself.
+- **Status:** SOLVED in Phase 7 (feature removed)
 
 ## L43. The weak-key warning is a simple count, and it appears while typing
 - **Limitation:** The orange note only counts different letters (fewer than 4). A key such as `ABCDABCDABCD` (period 4) or a repeated short word with 4 or more different letters is not flagged although it is also weak. The note is shown as soon as at least one letter has been typed, so it can flash briefly on the first three letters of a good key before a fourth different letter is typed. It never blocks anything.
 - **Viva defence:** The specification asked for exactly this rule. The note's wording says "allowed, but easy to break", and L3 and L6 explain why short periods are weak.
 - **Planned fix:** Also flag a key that is a repeat of a shorter block, and show the note only once the key reaches the minimum length.
-- **Status:** OPEN
+- **Phase 7 fix:** The weak-key note was removed entirely, so it can no longer flash while typing. (The underlying weakness is tracked in L6, which is open again.) The "n / 10 letters" counter and its red/green colour are kept.
+- **Status:** SOLVED in Phase 7 (feature removed)
 
 ## L44. Tab names are fitted once, when the window opens
 - **Limitation:** The window measures the long tab names against the smallest window width (950 pixels) with the real font when it starts, and uses the shorter names if they would not fit. It does not measure again if the text size of the display changes while the program is running. The tab names are plain labels; nothing in the program depends on them.
 - **Viva defence:** The window has a minimum size, so one measurement at start-up is enough in normal use; the screenshots at 950 x 680 show all four names whole.
 - **Planned fix:** Measure again on a font or scale change, or let the tab bar scroll.
+- **Status:** ACCEPTED
+
+---
+
+# Added in Phase 7 (the GUI as a viva demo tool)
+
+Tab names are as in Phase 6. Phase 7 removed the START HERE tour, the Run Self-Test button, the weak-key note, the Move output to input and Copy output buttons, the Attack sub-tabs, the live experiments and Table 3, the Full benchmark option and the Load saved results button. Entries that describe those features (L36 to L38, L42, L43) carry a Phase 7 note.
+
+## L45. The attack table in the GUI is a saved file, so it can go stale
+- **Limitation:** The "Saved experiment results" table shows `results/attack_results.csv` exactly as it was written by the last `python attack.py` run. If `attack.py` (or `cipher.py`) changes and the file is not regenerated, the window still shows the old numbers with no warning. The GUI cannot re-run the 100-trial experiment itself (it takes minutes). Opening the Attack tab re-reads the file, so a fresh run shows up without restarting the program. The Design tab's "works from about N letters" and "times slower" figures come from the saved files in the same way.
+- **Viva defence:** The numbers are the author's own full run (seed 486, 100 trials per row) and the file is tracked in git next to the code, so the version that produced it is known. A missing file is reported with the command that recreates it. Re-running the experiment on a laptop in front of an audience would be slow and give slightly different numbers each time the code or the row list changes (L40).
+- **Planned fix:** Re-run `python attack.py` and commit the CSV whenever `attack.py` or `cipher.py` changes; optionally have the GUI compare the message lengths in the file with `attack.TEXT_LENGTHS` and show a warning when they differ.
+- **Status:** OPEN
+
+## L46. The quick speed test is machine-dependent, short, and not saved
+- **Limitation:** The Run button makes only the quick measurement (messages up to 10,000 letters, fewer repeats than the full run), on whatever else the computer is doing at the time, inside the same program as the window. Its numbers are noisier than the saved full run (L29, L37) and are shown but not saved. After a quick run the saved table is not shown again until the program is restarted (reopening the tab keeps the quick run on screen so it is not wiped).
+- **Viva defence:** The window says where the table comes from ("Saved results: ..." or "Quick run on this computer (not saved)"), and the claim being shown is the shape (flat microseconds per character, about 2 times Shift), not the absolute milliseconds. The long full run is done once from the command line and kept in the CSV.
+- **Planned fix:** A "Show saved results" button, and optionally a Save button with the same protections as the old experiments page.
+- **Status:** ACCEPTED
+
+## L47. Layout was checked on Windows at three sizes, at one text scale
+- **Limitation:** The four tabs were checked from screenshots on Windows at 1920 x 1000, 1366 x 700 and the 950 x 680 minimum, with no cut-off text at 100 % text scale. A real 1366 x 768 laptop usually runs at 125 % or 150 % text scale, which makes the text larger than anything tested here, and the Attack tab (the fullest one) was already tight at 950 x 680. Other operating systems replace the Segoe UI and Consolas fonts. On a small screen the window now opens no larger than the screen allows (never below the 950 x 680 minimum), so a screen shorter than about 760 pixels still gets a window that is cut off at the bottom by the taskbar.
+- **Viva defence:** The window can be resized, the status bar and the tabs stay visible, and nothing needs scrolling at the tested sizes. The viva laptop can be checked in a minute before the day (open each tab once).
+- **Planned fix:** Try the window at 125 % and 150 % scaling and on one other operating system; if the Attack tab clips, shrink its fonts or let it scroll.
+- **Status:** OPEN
+
+## L48. The simpler GUI can do less than the earlier one
+- **Limitation:** Removed in Phase 7 and now available only from the command line or the report: attacking a ciphertext the user pastes in (and typing a crib), the live 10- and 100-trial experiment runs, Table 3 (the effect of the crib size; it is still in `results/attack_results.csv` and in the README), saving results from the window, the complexity fits and memory numbers (still in `results/benchmark_results.csv`), the long explanations of the attacks and limitations, and the built-in self-test button (the checks still run with `python -m unittest`).
+- **Viva defence:** The GUI is a demonstration of the four required items, not the place where all evidence lives; every removed result is in a saved file or in this log and the report.
+- **Planned fix:** None planned; any of these can be added back from the Phase 5 and Phase 6 versions of `gui.py` in git history.
+- **Status:** ACCEPTED
+
+## L49. The Design page's two attack numbers are rules of thumb
+- **Limitation:** "Frequency attack works from about N letters" is the smallest message length whose exact-success rate in the saved Table 1 is at least 80 %, on the row lengths that were tested (50, 100, 250, 500, ...). With the saved file it says 500 although the true threshold lies somewhere between 250 (29 %) and 500 (89 %), and the 80 % cut-off is a choice, not a law. "Known-plaintext needs a crib of at least key length + 3 letters" is the length at which the attack can PROVE a key length (`MIN_CHECKS`); a shorter crib can still work when the text is English (L28), and a crib shorter than the key can never recover it (L16).
+- **Viva defence:** The sentence is derived from the saved results by a fixed rule, not typed in, and it is worded "about" and "at least". The detailed tables and L15, L16 and L28 give the full picture.
+- **Planned fix:** Test more message lengths between 250 and 500, or report the whole curve.
 - **Status:** ACCEPTED

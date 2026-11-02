@@ -1,8 +1,7 @@
 """Phase 6 tests that need NO window and NO tkinter, so they always run.
 
 * N = 50 was added to the attack experiments.
-* The weak-key warning text, and the tour banner texts, are built from plain functions.
-* The new "notes" section of the Design page exists and holds no measured results.
+* Weak keys are still accepted by the cipher (the GUI warning from Phase 6 was removed in Phase 7).
 * If tkinter is missing, `python gui.py` prints one friendly line (no traceback) and
   the two GUI test files are SKIPPED, not errored. That is tested by starting a
   fresh Python in which importing tkinter is made to fail.
@@ -16,7 +15,6 @@ import unittest
 import attack
 import cipher
 import gui
-import help_text
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -59,66 +57,14 @@ class TestFiftyLetterMessages(unittest.TestCase):
         self.assertEqual(results["table1"][0]["text_length"], 50)
 
 
-class TestWeakKeyNoteText(unittest.TestCase):
-    def test_few_different_letters_are_flagged(self):
-        for key in ("AAAAAAAAAA", "aaaaaaaaaa", "ABABABABAB", "ABCABCABCABC", "aAaAaAaAaA"):
-            self.assertEqual(gui.weak_key_note(key), gui.WEAK_KEY_NOTE, key)
-
-    def test_four_or_more_different_letters_are_fine(self):
-        for key in ("ABCDABCDABCD", "CRYPTOGRAPHY", "LEMONSQUEEZE", "abcdefghij"):
-            self.assertEqual(gui.weak_key_note(key), "", key)
-
-    def test_nothing_typed_is_not_a_warning(self):
-        self.assertEqual(gui.weak_key_note(""), "")
-
-    def test_the_exact_wording(self):
-        self.assertEqual(gui.WEAK_KEY_NOTE, "Weak key: very few different letters. Allowed, but easy to break.")
-        self.assertEqual(gui.WEAK_KEY_MIN_DISTINCT, 4)
+class TestWeakKeysAreStillAccepted(unittest.TestCase):
+    """The GUI no longer WARNS about weak keys (Phase 7), but the cipher must keep accepting them (L6)."""
 
     def test_a_weak_key_is_still_accepted_by_the_cipher(self):
-        cipher.validate_key("AAAAAAAAAA", 4)                    # does not raise: only a warning, never a block
+        cipher.validate_key("AAAAAAAAAA", 4)                    # does not raise
         stage1, final = cipher.custom_encrypt("DEFENDTHEEASTWALL", "AAAAAAAAAA", 4)
         self.assertEqual(stage1, "DEFENDTHEEASTWALL")           # the key A shifts by 0: Stage 1 changes nothing
         self.assertEqual(cipher.custom_decrypt(final, "AAAAAAAAAA", 4), "DEFENDTHEEASTWALL")
-
-
-class TestBannerTexts(unittest.TestCase):
-    def test_experiments_banner_reads_trials_from_the_data(self):
-        data = gui.read_attack_csv()
-        for t in data.values():
-            for row in t:
-                row["trials"] = 42
-        self.assertIn("42 random trials", gui.experiments_banner(data))
-        self.assertIsNone(gui.experiments_banner(None))
-
-    def test_efficiency_banner_reads_slope_and_ratio_from_the_data(self):
-        data = gui.read_benchmark_csv()
-        for row in data["table_a"]:
-            row["ratio"] = 2.0
-        for fit in data["fits"]:
-            fit["loglog_slope"] = 0.987
-            fit["verdict"] = "linear (slope 0.987): doubling N roughly doubles the time, which is O(N)"
-        text = gui.efficiency_banner(data)
-        self.assertIn("0.99", text)
-        self.assertIn("2.0 times the Shift cipher", text)
-        self.assertIn("straight line", text)
-        self.assertIsNone(gui.efficiency_banner(None))
-
-
-class TestDesignPageNotes(unittest.TestCase):
-    def test_the_long_explanations_are_on_the_design_page(self):
-        document = help_text.build_help_document(gui.read_attack_csv(), gui.read_benchmark_csv())
-        full = "\n".join(text for _, text in document)
-        self.assertIn(help_text.SCREEN_NOTES_TITLE, full)
-        for needed in ("START HERE", "Reveal truth", "fewer than four different letters", "custom us/char",
-                       "removed when you lock", "python benchmark.py"):
-            self.assertIn(needed, full)
-        self.assertIn(help_text.SCREEN_NOTES_TEXT, help_text.STATIC_TEXT_BLOCKS)
-
-    def test_the_notes_contain_no_measured_numbers(self):
-        text = help_text.SCREEN_NOTES_TEXT
-        for forbidden in ("%", " ms", "slope", "trials per row"):
-            self.assertNotIn(forbidden, text)
 
 
 class TestWithoutTkinter(unittest.TestCase):
@@ -133,9 +79,9 @@ class TestWithoutTkinter(unittest.TestCase):
 
     def test_gui_can_still_be_imported_without_tkinter(self):
         done = run_python_without_tkinter(
-            "import gui; print(gui.tk is None, gui.weak_key_note('AAAAAAAAAA') != '')")
+            "import gui; print(gui.tk is None, gui.letter_accuracy('ABCD', 'ABXD'))")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.strip(), "True True")
+        self.assertEqual(done.stdout.strip(), "True 0.75")
 
     def test_the_gui_test_files_are_skipped_not_errored(self):
         # Test discovery is what `python -m unittest` uses; it turns a module-level SkipTest into a skip.
@@ -146,7 +92,7 @@ class TestWithoutTkinter(unittest.TestCase):
                 " 'RUN', result.testsRun)\n")
         done = run_python_without_tkinter(code)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("SKIPPED 3 ERRORS 0 FAILURES 0 RUN 3", done.stdout + done.stderr)
+        self.assertIn("SKIPPED 2 ERRORS 0 FAILURES 0 RUN 2", done.stdout + done.stderr)
         self.assertIn("tkinter is not installed", done.stderr)          # the reason is stated clearly
 
 

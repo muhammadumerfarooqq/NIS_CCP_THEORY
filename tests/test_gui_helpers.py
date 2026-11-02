@@ -24,26 +24,6 @@ TINY_SETTINGS = {
 }
 
 
-class TestSelfTestChecks(unittest.TestCase):
-    def test_all_checks_pass_on_the_real_cipher(self):
-        checks, ms = gui.run_self_test_checks()
-        self.assertTrue(all(passed for _, passed, _ in checks), [c for c in checks if not c[1]])
-        self.assertGreater(ms, 0)
-        names = " | ".join(name for name, _, _ in checks)
-        for needed in ("Shift", "Vigenere", "Rail Fence", "300 random"):
-            self.assertIn(needed, names)
-
-    def test_a_broken_cipher_makes_the_self_test_fail(self):
-        original = cipher.rail_decrypt
-        cipher.rail_decrypt = lambda ct, rails: ct          # deliberately wrong
-        try:
-            checks, _ = gui.run_self_test_checks()
-        finally:
-            cipher.rail_decrypt = original
-        self.assertTrue(any(not passed for _, passed, _ in checks))
-        self.assertTrue(all(passed for _, passed, _ in gui.run_self_test_checks()[0]))   # and it recovers
-
-
 class TestSmallHelpers(unittest.TestCase):
     def test_letter_accuracy(self):
         self.assertEqual(gui.letter_accuracy("ABCD", "ABXD"), 0.75)
@@ -55,20 +35,7 @@ class TestSmallHelpers(unittest.TestCase):
         for value, expected in ((33.6, 50), (0.331, 0.5), (1.0, 1), (120, 200), (7, 10), (0.04, 0.05), (0, 1)):
             self.assertAlmostEqual(gui.nice_ceiling(value), expected, msg=value)
 
-    def test_protected_paths(self):
-        self.assertTrue(gui.is_protected(attack.RESULTS_PATH))
-        self.assertTrue(gui.is_protected(benchmark.RESULTS_PATH))
-        self.assertTrue(gui.is_protected(os.path.join(os.path.dirname(attack.RESULTS_PATH), "..", "results",
-                                                      "attack_results.csv")))
-        self.assertFalse(gui.is_protected(os.path.join(os.path.dirname(attack.RESULTS_PATH), "attack_results_gui.csv")))
-
-    def test_table_rows_are_formatted_like_the_command_line_programs(self):
-        rows = attack.run_experiments(trials=1)
-        for name, vary in (("table1", "text_length"), ("table2", "text_length"), ("table3", "crib")):
-            printed = attack.format_table("t", rows[name], vary).splitlines()[3:]
-            self.assertEqual(len(printed), len(rows[name]))
-            for line, row in zip(printed, rows[name]):
-                self.assertEqual(line.split(), gui.format_attack_row(row, vary))
+    def test_speed_rows_are_formatted_like_the_benchmark_program_prints_them(self):
         results = benchmark.run_benchmarks(TINY_SETTINGS)
         printed = benchmark.format_rows(
             "t", [("N", "n", "d", 8), ("a", "shift_enc_ms", ".4f", 13), ("b", "custom_enc_ms", ".4f", 14),
@@ -76,6 +43,36 @@ class TestSmallHelpers(unittest.TestCase):
             results["table_a"]).splitlines()[3:]
         for line, row in zip(printed, results["table_a"]):
             self.assertEqual(line.split(), gui.format_speed_row(row))
+
+
+class TestAttackSummary(unittest.TestCase):
+    """The ONE table on the Attack tab is Table 1 and Table 2 of attack_results.csv side by side."""
+
+    def test_columns_come_from_the_real_csv_columns(self):
+        data = gui.read_attack_csv()
+        summary = gui.attack_summary(data)
+        self.assertEqual(summary["trials"], data["table1"][0]["trials"])
+        self.assertEqual(summary["crib"], data["table2"][0]["crib"])
+        self.assertEqual(len(summary["rows"]), len(data["table1"]))
+        for row, freq, kpa in zip(summary["rows"], data["table1"], data["table2"]):
+            self.assertEqual(row, [str(freq["text_length"]), f"{freq['exact_pct']:.1f}", f"{freq['median_ms']:.2f}",
+                                   f"{kpa['exact_pct']:.1f}", f"{kpa['median_ms']:.2f}"])
+            self.assertEqual(freq["text_length"], kpa["text_length"])
+
+    def test_the_numbers_match_what_attack_py_prints(self):
+        results = attack.run_experiments(trials=1)
+        summary = gui.attack_summary(results)
+        printed = {name: attack.format_table("t", results[name], "text_length").splitlines()[3:]
+                   for name in ("table1", "table2")}
+        for row, line1, line2 in zip(summary["rows"], printed["table1"], printed["table2"]):
+            n, exact1, _text, _key, _rails, ms1, _guesses = line1.split()
+            _n, exact2, _text, _key, _rails, ms2, _guesses = line2.split()
+            self.assertEqual(row, [n, exact1, ms1, exact2, ms2])
+
+    def test_a_length_missing_from_table_2_shows_a_dash(self):
+        data = gui.read_attack_csv()
+        data["table2"] = [r for r in data["table2"] if r["text_length"] != 50]
+        self.assertEqual(gui.attack_summary(data)["rows"][0][3:], ["-", "-"])
 
 
 class TestCsvReaders(unittest.TestCase):
@@ -136,62 +133,77 @@ class TestCsvReaders(unittest.TestCase):
                 gui.read_benchmark_csv(bad)
 
 
-class TestHelpText(unittest.TestCase):
-    def test_static_text_contains_no_measured_results(self):
-        for block in help_text.STATIC_TEXT_BLOCKS:
-            self.assertNotIn("%", block)
-            self.assertNotIn(" ms", block)
-            self.assertNotIn("slope", block)
-        # The worked examples are there.
-        self.assertIn("D (3) + C (2) = 5  ->  F", help_text.STAGE1_TEXT)
-        self.assertIn("JEENO", help_text.STAGE1_TEXT)
-        self.assertIn("AEIBDFHJCG", help_text.STAGE2_TEXT)
+class TestDesignLines(unittest.TestCase):
+    def lines(self, attack_data="real", speed_data="real"):
+        attack_data = gui.read_attack_csv() if attack_data == "real" else attack_data
+        speed_data = gui.read_benchmark_csv() if speed_data == "real" else speed_data
+        return help_text.design_lines(attack_data, speed_data)
 
-    def test_missing_csv_is_stated_not_invented(self):
-        attack_text = help_text.attack_results_lines(None)
-        speed_text = help_text.speed_results_lines(None)
-        self.assertIn("was not found", attack_text)
-        self.assertIn("was not found", speed_text)
-        self.assertFalse(any(ch.isdigit() for ch in attack_text.replace("attack.py", "")))
-        self.assertFalse(any(ch.isdigit() for ch in speed_text.replace("benchmark.py", "")))
-        document = help_text.build_help_document(None, None)
-        full = "\n".join(text for _, text in document)
-        self.assertIn("python attack.py", full)
-        self.assertIn("python benchmark.py", full)
+    def test_the_page_is_short_and_has_the_wanted_content(self):
+        lines = self.lines()
+        self.assertLessEqual(len(lines), 14)                        # one screen, no scrolling
+        text = "\n".join(t for _, t in lines)
+        for needed in ("Two stages, applied in order.", "Stage 1 - Vigenere (substitution)",
+                       "Stage 2 - Rail Fence (transposition)", "Unlock = undo Stage 2 first, then Stage 1.",
+                       "Why combine:", "Key: at least 10 letters for Stage 1, plus rails 2 to 10 for Stage 2.",
+                       "Speed: both stages are O(N).", "Attack: frequency attack works from about"):
+            self.assertIn(needed, text)
+        self.assertEqual({style for style, _ in lines}, {"title", "stage1", "stage2", "example", "body"})
+
+    def test_the_examples_are_the_lecture_answers_and_come_from_cipher_py(self):
+        self.assertEqual(help_text.stage1_example(), ("HELLO + key CAT = JEENO", True))
+        self.assertEqual(help_text.stage2_example(), ("ABCDEFGHIJ on 3 rails = AEIBDFHJCG", True))
+        self.assertEqual(cipher.vigenere_encrypt("HELLO", "CAT"), "JEENO")
+        self.assertEqual(cipher.rail_encrypt("ABCDEFGHIJ", 3), "AEIBDFHJCG")
+        shown = [text for style, text in self.lines() if style == "example"]
+        self.assertEqual(shown, ["HELLO + key CAT = JEENO", "ABCDEFGHIJ on 3 rails = AEIBDFHJCG"])
+
+    def test_a_cipher_that_disagrees_gives_a_red_warning_instead_of_the_example(self):
+        real_vigenere, real_rail = cipher.vigenere_encrypt, cipher.rail_encrypt
+        try:
+            cipher.vigenere_encrypt = lambda text, key: "WRONG"
+            styles = [style for style, _ in self.lines()]
+            self.assertEqual(styles.count("warning"), 1)
+            warning = [t for style, t in self.lines() if style == "warning"][0]
+            self.assertIn("Stage 1 example does not match cipher.py", warning)
+            cipher.vigenere_encrypt = real_vigenere
+            cipher.rail_encrypt = lambda text, rails: text[::-1]
+            warning = [t for style, t in self.lines() if style == "warning"][0]
+            self.assertIn("Stage 2 example does not match cipher.py", warning)
+        finally:
+            cipher.vigenere_encrypt, cipher.rail_encrypt = real_vigenere, real_rail
+        self.assertNotIn("warning", [style for style, _ in self.lines()])        # and it recovers
 
     def test_numbers_come_from_the_data_that_is_passed_in(self):
-        attack_data = {
-            "table1": [{"text_length": 777, "crib": "", "trials": 4242, "exact_pct": 61.3, "key_acc_pct": 62.7,
-                        "rails_pct": 63.9}],
-            "table2": [{"text_length": 778, "crib": 31, "trials": 4242, "exact_pct": 71.1, "key_acc_pct": 72.2,
-                        "rails_pct": 73.3}],
-            "table3": [{"text_length": 779, "crib": 12, "trials": 4242, "exact_pct": 81.4, "key_acc_pct": 82.5,
-                        "rails_pct": 83.6}],
-        }
-        speed_data = {
-            "table_a": [{"n": 11, "us_per_char": 0.123}, {"n": 99999, "us_per_char": 0.456}],
-            "fits": [{"name": "Custom enc", "loglog_slope": 1.234, "r_squared": 0.98765, "verdict": "VERDICT TEXT"}],
-            "memory": [{"name": "Custom enc", "n": 5555, "peak_kb": 321.0, "bytes_per_char": 59.1}],
-        }
-        text = help_text.attack_results_lines(attack_data) + help_text.speed_results_lines(speed_data)
-        for expected in ("4242 trials per row", "61.3", "73.3", "crib of 31", "779 letters", "83.6",
-                         "0.123", "0.456", "1.234", "0.98765", "VERDICT TEXT", "5555", "321.0"):
-            self.assertIn(expected, text)
+        attack_data = {"table1": [{"text_length": 70, "exact_pct": 79.9}, {"text_length": 90, "exact_pct": 80.0},
+                                  {"text_length": 110, "exact_pct": 100.0}],
+                       "table2": [], "table3": []}
+        speed_data = {"table_a": [{"ratio": 3.0}, {"ratio": 5.0}, {"ratio": 4.0}]}
+        text = "\n".join(t for _, t in self.lines(attack_data, speed_data))
+        self.assertIn("Custom is about 4.0 times slower than Shift.", text)          # median of 3, 5, 4
+        self.assertIn("frequency attack works from about 90 letters", text)         # 80 percent counts, 79.9 does not
+        self.assertIn(f"key length + {attack.MIN_CHECKS} letters", text)           # from the code's own constant
 
-    def test_code_constants_in_the_explanations_are_not_hard_coded(self):
-        text = help_text.attacks_text()
-        self.assertIn(f"at least {attack.MIN_CHECKS} comparisons", text)
-        self.assertIn(f"{cipher.MIN_RAILS} to {cipher.MAX_RAILS}", text)
-        self.assertIn(f"only {cipher.MAX_RAILS - cipher.MIN_RAILS + 1} possible keys", help_text.limitations_text())
+    def test_the_real_files_give_the_real_numbers(self):
+        attack_data, speed_data = gui.read_attack_csv(), gui.read_benchmark_csv()
+        text = "\n".join(t for _, t in help_text.design_lines(attack_data, speed_data))
+        good = [r["text_length"] for r in attack_data["table1"] if r["exact_pct"] >= 80]
+        self.assertIn(f"works from about {min(good)} letters", text)
+        ratios = sorted(r["ratio"] for r in speed_data["table_a"])
+        middle = (ratios[len(ratios) // 2 - 1] + ratios[len(ratios) // 2]) / 2
+        self.assertIn(f"about {middle:.1f} times slower", text)
 
-    def test_document_structure(self):
-        document = help_text.build_help_document(gui.read_attack_csv(), gui.read_benchmark_csv())
-        styles = {style for style, _ in document}
-        self.assertTrue({"title", "heading", "stage1", "stage2", "body", "mono", "note"} <= styles)
-        full = "\n".join(text for _, text in document)
-        for needed in ("Shift cipher", "O(N + k)", "Index of Coincidence", "Chi-squared", "crib",
-                       "periodicity", "undoes Stage 2 first", "Classical ciphers are not secure"):
-            self.assertIn(needed, full)
+    def test_no_frequency_success_reaches_the_target(self):
+        data = {"table1": [{"text_length": 100, "exact_pct": 10.0}], "table2": [], "table3": []}
+        self.assertIn("did not reach 80 percent", help_text.attack_line(data))
+
+    def test_missing_csv_is_stated_not_invented(self):
+        text = "\n".join(t for _, t in help_text.design_lines(None, None))
+        self.assertIn("results/benchmark_results.csv was not found", text)
+        self.assertIn("results/attack_results.csv was not found", text)
+        self.assertNotIn("times slower", text)
+        self.assertNotIn("works from about", text)
+        self.assertIn("Stage 1 - Vigenere", text)                                    # the fixed words are still there
 
 
 if __name__ == "__main__":
